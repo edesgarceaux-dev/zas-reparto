@@ -167,7 +167,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         <button class="btn" id="nuevoPedido">+ Nuevo pedido</button>
       </div>
       <div class="tbl"><table>
-        <thead><tr><th>Código</th><th>Cliente final</th><th>Dirección</th><th>Empresa</th><th>Monto</th><th>Repartidor</th><th>Estado</th><th>Hora</th></tr></thead>
+        <thead><tr><th>Código</th><th>Cliente final</th><th>Dirección</th><th>Comuna</th><th>Empresa</th><th>Monto</th><th>Repartidor</th><th>Estado</th><th>Hora</th></tr></thead>
         <tbody id="tbodyPed"></tbody>
       </table></div>
     </section>
@@ -437,13 +437,14 @@ function pintarPedidos(){
     <tr onclick="verDetalle(${p.id})">
       <td class="cod">${esc(p.codigo||'#'+p.id)}${p.origen==='jumpseller'?'<br><span style="color:#1baf7a">⚡ auto</span>':''}</td>
       <td><b>${esc(p.cliente_nombre)}</b>${p.detalle?`<br><span class="cod">${esc(p.detalle)}</span>`:''}</td>
-      <td>${esc(p.direccion)}${p.comuna?`, ${esc(p.comuna)}`:''}</td>
+      <td>${esc(p.direccion)}</td>
+      <td>${p.comuna? esc(p.comuna) : '<span class="cod">—</span>'}</td>
       <td>${p.cliente_id? esc(clienteDe(p.cliente_id)||'…') : '<span class="cod">—</span>'}</td>
       <td>${clp(p.monto)}</td>
       <td>${p.repartidor_id? esc(nombreDe(p.repartidor_id)) : '<span class="cod">—</span>'}</td>
       <td>${stChip(p.estado)}</td>
       <td class="cod">${hora(p.creado_en)}</td>
-    </tr>`).join('') : '<tr><td colspan="8" class="empty">No hay pedidos con este filtro.</td></tr>';
+    </tr>`).join('') : '<tr><td colspan="9" class="empty">No hay pedidos con este filtro.</td></tr>';
 }
 
 function pintarReps(){
@@ -569,7 +570,7 @@ window.verDetalle = async (id)=>{
   const filas = [
     ['Empresa', p.cliente_id? (clienteDe(p.cliente_id)||'')+(p.origen==='jumpseller'?' (⚡ pedido automático Jumpseller'+(p.externo_id?' #'+p.externo_id:'')+')':'') : null],
     ['Cliente',p.cliente_nombre],['Teléfono',p.cliente_telefono],
-    ['Dirección',p.direccion + (p.comuna?', '+p.comuna:'')],['Referencia',p.referencia],
+    ['Dirección',p.direccion],['Comuna',p.comuna],['Referencia',p.referencia],
     ['Detalle',p.detalle],['Monto',p.monto!=null?clp(p.monto)+' ('+(p.metodo_pago||'')+')':null],
     ['Repartidor',p.repartidor_id?nombreDe(p.repartidor_id):'Sin asignar'],['Nota entrega',p.nota_entrega],
   ].filter(([,v])=>v).map(([k,v])=>`<div class="row"><b>${k}</b><span>${esc(v)}</span></div>`).join('');
