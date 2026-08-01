@@ -130,6 +130,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     <nav>
       <button data-t="resumen" class="on">Resumen</button>
       <button data-t="pedidos">Pedidos</button>
+      <button data-t="clientes">Clientes</button>
       <button data-t="repartidores">Repartidores</button>
     </nav>
     <span class="live"><span class="dot"></span>en vivo</span>
@@ -160,8 +161,21 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         <button class="btn" id="nuevoPedido">+ Nuevo pedido</button>
       </div>
       <div class="tbl"><table>
-        <thead><tr><th>Código</th><th>Cliente</th><th>Dirección</th><th>Monto</th><th>Repartidor</th><th>Estado</th><th>Hora</th></tr></thead>
+        <thead><tr><th>Código</th><th>Cliente final</th><th>Dirección</th><th>Empresa</th><th>Monto</th><th>Repartidor</th><th>Estado</th><th>Hora</th></tr></thead>
         <tbody id="tbodyPed"></tbody>
+      </table></div>
+    </section>
+
+    <!-- Clientes -->
+    <section id="t-clientes" style="display:none">
+      <div class="bar">
+        <span style="color:var(--muted);font-size:13px">Empresas a las que ZAS les hace el reparto. Las que tienen tienda Jumpseller reciben pedidos automáticamente.</span>
+        <span class="sp"></span>
+        <button class="btn" id="nuevoCliente">+ Nuevo cliente</button>
+      </div>
+      <div class="tbl"><table>
+        <thead><tr><th>Empresa</th><th>Contacto</th><th>Retiro</th><th>Integración</th><th>Pedidos hoy</th><th></th></tr></thead>
+        <tbody id="tbodyCli"></tbody>
       </table></div>
     </section>
 
@@ -182,8 +196,10 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
 <!-- modal nuevo pedido -->
 <div class="veil" id="mPedido"><div class="modal">
   <h2>Nuevo pedido</h2>
+  <label>Empresa (opcional)</label>
+  <select id="pEmpresa"><option value="">— Pedido propio de ZAS —</option></select>
   <div class="cols">
-    <div><label>Cliente *</label><input id="pCliente"></div>
+    <div><label>Cliente final *</label><input id="pCliente"></div>
     <div><label>Teléfono</label><input id="pTel"></div>
   </div>
   <label>Dirección *</label><input id="pDir">
@@ -209,6 +225,35 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
 
 <!-- modal detalle pedido -->
 <div class="veil" id="mDet"><div class="modal" id="mDetBody"></div></div>
+
+<!-- modal cliente -->
+<div class="veil" id="mCliente"><div class="modal">
+  <h2 id="cTitulo">Nuevo cliente</h2>
+  <label>Nombre de la empresa *</label><input id="cNombre">
+  <div class="cols">
+    <div><label>RUT</label><input id="cRut"></div>
+    <div><label>Teléfono</label><input id="cTel"></div>
+  </div>
+  <label>Correo</label><input id="cEmail" type="email">
+  <label>Dirección de retiro (bodega/tienda)</label><input id="cDir">
+  <label>Comuna</label><input id="cComuna">
+  <label>Notas</label><textarea id="cNotas" rows="2"></textarea>
+  <label>Integración</label>
+  <select id="cInteg">
+    <option value="manual">Manual (sin tienda online)</option>
+    <option value="jumpseller">Jumpseller (pedidos automáticos)</option>
+  </select>
+  <div id="cWebhook" style="display:none;margin-top:10px;padding:10px;background:#f0efec;border-radius:8px;font-size:12px">
+    <b>URL de conexión para Jumpseller</b> (se usa una sola vez al conectar la tienda):
+    <div id="cWebhookUrl" style="word-break:break-all;font-family:monospace;margin-top:6px"></div>
+    <button class="btn btn-ghost" style="margin-top:8px" id="cCopiar">Copiar URL</button>
+  </div>
+  <div class="err" id="cErr"></div>
+  <div class="foot">
+    <button class="btn btn-ghost" onclick="cerrar('mCliente')">Cancelar</button>
+    <button class="btn" id="cGuardar">Guardar</button>
+  </div>
+</div></div>
 
 <!-- modal nuevo repartidor -->
 <div class="veil" id="mRep"><div class="modal">
@@ -241,7 +286,10 @@ const EST = {
   cancelado:  ['Cancelado','🚫','var(--st-cancelado)'],
 };
 const FIN = ['entregado','cancelado','no_entregado'];
-let pedidos = [], perfiles = [], filtro = 'activos', busq = '';
+const FUNCION_URL = SUPABASE_URL + '/functions/v1/jumpseller';
+const WEBHOOK_TOKEN = '65e42ae41505d0df25ca6efbd9e9c620ab0d6e0b22486679';
+let pedidos = [], perfiles = [], clientes = [], filtro = 'activos', busq = '', clienteEditando = null;
+const clienteDe = id => (clientes.find(c=>c.id===id)||{}).nombre;
 const $ = id => document.getElementById(id);
 const esc = s => (s??'').toString().replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const clp = n => n==null?'—':'$'+Number(n).toLocaleString('es-CL');
@@ -277,11 +325,12 @@ sb.auth.onAuthStateChange(async (_ev, session)=>{
 
 /* ---------- DATOS ---------- */
 async function cargarTodo(){
-  const [p1,p2] = await Promise.all([
+  const [p1,p2,p3] = await Promise.all([
     sb.from('perfiles').select().order('nombre'),
     sb.from('pedidos').select().order('creado_en',{ascending:false}).limit(1000),
+    sb.from('clientes').select().order('nombre'),
   ]);
-  perfiles = p1.data||[]; pedidos = p2.data||[];
+  perfiles = p1.data||[]; pedidos = p2.data||[]; clientes = p3.data||[];
   pintar();
 }
 function suscribir(){
@@ -295,7 +344,7 @@ function suscribir(){
 }
 
 /* ---------- PINTAR ---------- */
-function pintar(){ pintarTiles(); pintarPedidos(); pintarRendimiento(); pintarReps(); }
+function pintar(){ pintarTiles(); pintarPedidos(); pintarRendimiento(); pintarReps(); pintarClientes(); }
 
 function pintarTiles(){
   const hoy = hoyStr();
@@ -332,19 +381,20 @@ function pintarPedidos(){
     const f = filtro==='activos' ? !FIN.includes(p.estado)
       : filtro==='sin_asignar' ? p.estado==='pendiente'
       : filtro==='hoy' ? p.fecha_pedido===hoy : true;
-    const m = !q || [p.codigo,p.cliente_nombre,p.direccion,p.comuna].join(' ').toLowerCase().includes(q);
+    const m = !q || [p.codigo,p.cliente_nombre,p.direccion,p.comuna,clienteDe(p.cliente_id)||''].join(' ').toLowerCase().includes(q);
     return f && m;
   });
   $('tbodyPed').innerHTML = lista.length? lista.map(p=>`
     <tr onclick="verDetalle(${p.id})">
-      <td class="cod">${esc(p.codigo||'#'+p.id)}</td>
+      <td class="cod">${esc(p.codigo||'#'+p.id)}${p.origen==='jumpseller'?'<br><span style="color:#1baf7a">⚡ auto</span>':''}</td>
       <td><b>${esc(p.cliente_nombre)}</b>${p.detalle?`<br><span class="cod">${esc(p.detalle)}</span>`:''}</td>
       <td>${esc(p.direccion)}${p.comuna?`, ${esc(p.comuna)}`:''}</td>
+      <td>${p.cliente_id? esc(clienteDe(p.cliente_id)||'…') : '<span class="cod">—</span>'}</td>
       <td>${clp(p.monto)}</td>
       <td>${p.repartidor_id? esc(nombreDe(p.repartidor_id)) : '<span class="cod">—</span>'}</td>
       <td>${stChip(p.estado)}</td>
       <td class="cod">${hora(p.creado_en)}</td>
-    </tr>`).join('') : '<tr><td colspan="7" class="empty">No hay pedidos con este filtro.</td></tr>';
+    </tr>`).join('') : '<tr><td colspan="8" class="empty">No hay pedidos con este filtro.</td></tr>';
 }
 
 function pintarReps(){
@@ -357,6 +407,60 @@ function pintarReps(){
     </tr>`).join('') : '<tr><td colspan="4" class="empty">Aún no hay repartidores. Crea el primero.</td></tr>';
 }
 
+function pintarClientes(){
+  const hoy = hoyStr();
+  $('tbodyCli').innerHTML = clientes.length? clientes.map(c=>{
+    const deHoy = pedidos.filter(p=>p.cliente_id===c.id && p.fecha_pedido===hoy).length;
+    return `<tr style="cursor:default">
+      <td><b>${esc(c.nombre)}</b>${c.rut?`<br><span class="cod">${esc(c.rut)}</span>`:''}${c.activo?'':' <span class="cod">(inactivo)</span>'}</td>
+      <td>${esc(c.telefono||'')}${c.email?`<br><span class="cod">${esc(c.email)}</span>`:''}</td>
+      <td>${esc(c.direccion_retiro||'—')}${c.comuna?`, ${esc(c.comuna)}`:''}</td>
+      <td>${c.integracion==='jumpseller'?'🛒 Jumpseller':'✍️ Manual'}</td>
+      <td>${deHoy}</td>
+      <td><button class="btn btn-ghost" onclick="editarCliente(${c.id})">Editar</button></td>
+    </tr>`;
+  }).join('') : '<tr><td colspan="6" class="empty">Aún no hay clientes. Crea el primero.</td></tr>';
+}
+
+function abrirModalCliente(c){
+  clienteEditando = c ? c.id : null;
+  $('cTitulo').textContent = c ? 'Editar cliente' : 'Nuevo cliente';
+  $('cNombre').value = c?.nombre||''; $('cRut').value = c?.rut||'';
+  $('cTel').value = c?.telefono||''; $('cEmail').value = c?.email||'';
+  $('cDir').value = c?.direccion_retiro||''; $('cComuna').value = c?.comuna||'';
+  $('cNotas').value = c?.notas||''; $('cInteg').value = c?.integracion||'manual';
+  $('cErr').textContent='';
+  actualizarWebhookBox();
+  $('mCliente').classList.add('on'); $('cNombre').focus();
+}
+function actualizarWebhookBox(){
+  const esJump = $('cInteg').value==='jumpseller';
+  $('cWebhook').style.display = (esJump && clienteEditando) ? 'block' : 'none';
+  if(esJump && clienteEditando){
+    $('cWebhookUrl').textContent = `${FUNCION_URL}?token=${WEBHOOK_TOKEN}&cliente=${clienteEditando}`;
+  }
+}
+$('cInteg').onchange = actualizarWebhookBox;
+$('cCopiar').onclick = ()=>{ navigator.clipboard.writeText($('cWebhookUrl').textContent); toast('URL copiada'); };
+$('nuevoCliente').onclick = ()=> abrirModalCliente(null);
+window.editarCliente = id => abrirModalCliente(clientes.find(c=>c.id===id));
+$('cGuardar').onclick = async ()=>{
+  if(!$('cNombre').value.trim()){ $('cErr').textContent='El nombre es obligatorio.'; return; }
+  const datos = {
+    nombre:$('cNombre').value.trim(), rut:$('cRut').value.trim()||null,
+    telefono:$('cTel').value.trim()||null, email:$('cEmail').value.trim()||null,
+    direccion_retiro:$('cDir').value.trim()||null, comuna:$('cComuna').value.trim()||null,
+    notas:$('cNotas').value.trim()||null, integracion:$('cInteg').value,
+  };
+  const q = clienteEditando
+    ? sb.from('clientes').update(datos).eq('id', clienteEditando)
+    : sb.from('clientes').insert(datos);
+  const { error } = await q;
+  if(error){ $('cErr').textContent=error.message; return; }
+  cerrar('mCliente'); toast(clienteEditando?'Cliente actualizado':'Cliente creado');
+  await cargarTodo();
+};
+
 /* ---------- ACCIONES ---------- */
 window.toggleRep = async (id, v)=>{
   const { error } = await sb.from('perfiles').update({activo:v}).eq('id', id);
@@ -368,6 +472,8 @@ $('nuevoPedido').onclick = ()=>{
   $('pErr').textContent='';
   $('pRep').innerHTML = '<option value="">Sin asignar</option>' +
     perfiles.filter(p=>p.rol==='repartidor'&&p.activo).map(r=>`<option value="${r.id}">${esc(r.nombre)}</option>`).join('');
+  $('pEmpresa').innerHTML = '<option value="">— Pedido propio de ZAS —</option>' +
+    clientes.filter(c=>c.activo).map(c=>`<option value="${c.id}">${esc(c.nombre)}</option>`).join('');
   $('mPedido').classList.add('on'); $('pCliente').focus();
 };
 $('pGuardar').onclick = async ()=>{
@@ -379,6 +485,7 @@ $('pGuardar').onclick = async ()=>{
     referencia:$('pRef').value.trim()||null, detalle:$('pDet').value.trim()||null,
     monto:$('pMonto').value?Number($('pMonto').value):null, metodo_pago:$('pPago').value,
     repartidor_id:rep, estado:rep?'asignado':'pendiente',
+    cliente_id:$('pEmpresa').value?Number($('pEmpresa').value):null,
     creado_por:(await sb.auth.getUser()).data.user.id, origen:'manual',
   });
   if(error){ $('pErr').textContent=error.message; return; }
@@ -390,6 +497,7 @@ window.verDetalle = async (id)=>{
   const { data:hist } = await sb.from('pedido_historial').select().eq('pedido_id',id).order('creado_en');
   const reps = perfiles.filter(x=>x.rol==='repartidor'&&x.activo);
   const filas = [
+    ['Empresa', p.cliente_id? (clienteDe(p.cliente_id)||'')+(p.origen==='jumpseller'?' (⚡ pedido automático Jumpseller'+(p.externo_id?' #'+p.externo_id:'')+')':'') : null],
     ['Cliente',p.cliente_nombre],['Teléfono',p.cliente_telefono],
     ['Dirección',p.direccion + (p.comuna?', '+p.comuna:'')],['Referencia',p.referencia],
     ['Detalle',p.detalle],['Monto',p.monto!=null?clp(p.monto)+' ('+(p.metodo_pago||'')+')':null],
@@ -452,7 +560,7 @@ $('buscar').oninput = e=>{ busq = e.target.value; pintarPedidos(); };
 document.querySelectorAll('nav button').forEach(b=> b.onclick = ()=>{
   document.querySelectorAll('nav button').forEach(x=>x.classList.remove('on'));
   b.classList.add('on');
-  ['resumen','pedidos','repartidores'].forEach(t=> $('t-'+t).style.display = t===b.dataset.t?'block':'none');
+  ['resumen','pedidos','clientes','repartidores'].forEach(t=> $('t-'+t).style.display = t===b.dataset.t?'block':'none');
 });
 
 /* cerrar modales con clic afuera o Escape */

@@ -37,3 +37,4 @@ pendiente → asignado → aceptado → en_camino → entregado (o no_entregado 
 - [ ] Etapa 2: GPS de repartidores en mapa + prueba de entrega con foto/firma
 - [ ] Notificaciones push con app cerrada (Firebase FCM)
 - [ ] Etapa 3: importación desde Excel + reportes
+Panel en línea

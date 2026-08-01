@@ -14,10 +14,23 @@ class RepartidorHome extends StatefulWidget {
 class _RepartidorHomeState extends State<RepartidorHome> {
   late final Stream<List<Map<String, dynamic>>> _stream;
   int _cantidadAnterior = -1;
+  Map<int, Map<String, dynamic>> _clientes = {};
+
+  Future<void> _cargarClientes() async {
+    final rows = await supa
+        .from('clientes')
+        .select('id, nombre, direccion_retiro, comuna');
+    if (mounted) {
+      setState(() => _clientes = {
+            for (final c in rows) c['id'] as int: Map<String, dynamic>.from(c)
+          });
+    }
+  }
 
   @override
   void initState() {
     super.initState();
+    _cargarClientes();
     _stream = supa
         .from('pedidos')
         .stream(primaryKey: ['id'])
@@ -179,6 +192,21 @@ class _RepartidorHomeState extends State<RepartidorHome> {
               ],
             ),
             const SizedBox(height: 8),
+            if (p['cliente_id'] != null && _clientes[p['cliente_id']] != null)
+              Container(
+                margin: const EdgeInsets.only(bottom: 4),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                    color: Colors.orange.shade50,
+                    borderRadius: BorderRadius.circular(6)),
+                child: Text(
+                  'Retiro: ${_clientes[p['cliente_id']]!['nombre']}'
+                  '${_clientes[p['cliente_id']]!['direccion_retiro'] != null ? ' · ${_clientes[p['cliente_id']]!['direccion_retiro']}' : ''}',
+                  style: TextStyle(
+                      fontSize: 12, color: Colors.orange.shade900),
+                ),
+              ),
             Text(p['cliente_nombre'],
                 style: const TextStyle(
                     fontWeight: FontWeight.bold, fontSize: 16)),

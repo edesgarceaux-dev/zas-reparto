@@ -19,13 +19,27 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
   final _monto = TextEditingController();
   String _metodoPago = 'pagado';
   String? _repartidorId;
+  int? _clienteId;
   List<Map<String, dynamic>> _repartidores = [];
+  List<Map<String, dynamic>> _clientes = [];
   bool _guardando = false;
 
   @override
   void initState() {
     super.initState();
     _cargarRepartidores();
+    _cargarClientes();
+  }
+
+  Future<void> _cargarClientes() async {
+    final rows = await supa
+        .from('clientes')
+        .select('id, nombre')
+        .eq('activo', true)
+        .order('nombre');
+    if (mounted) {
+      setState(() => _clientes = List<Map<String, dynamic>>.from(rows));
+    }
   }
 
   Future<void> _cargarRepartidores() async {
@@ -58,6 +72,7 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
             : num.tryParse(_monto.text.replaceAll('.', '').trim()),
         'metodo_pago': _metodoPago,
         'repartidor_id': _repartidorId,
+        'cliente_id': _clienteId,
         'estado': _repartidorId == null ? 'pendiente' : 'asignado',
         'creado_por': supa.auth.currentUser!.id,
       });
@@ -85,6 +100,21 @@ class _CrearPedidoScreenState extends State<CrearPedidoScreen> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            DropdownButtonFormField<int?>(
+              value: _clienteId,
+              decoration: const InputDecoration(
+                  labelText: 'Empresa (opcional)',
+                  border: OutlineInputBorder()),
+              items: [
+                const DropdownMenuItem(
+                    value: null, child: Text('Pedido propio de ZAS')),
+                for (final c in _clientes)
+                  DropdownMenuItem(
+                      value: c['id'] as int, child: Text(c['nombre'])),
+              ],
+              onChanged: (v) => setState(() => _clienteId = v),
+            ),
+            const SizedBox(height: 12),
             TextFormField(
               controller: _cliente,
               decoration: const InputDecoration(

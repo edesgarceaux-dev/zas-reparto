@@ -15,6 +15,7 @@ class _DetallePedidoScreenState extends State<DetallePedidoScreen> {
   List<Map<String, dynamic>> _repartidores = [];
   List<Map<String, dynamic>> _historial = [];
   Map<String, String> _nombres = {};
+  Map<int, String> _clientes = {};
 
   @override
   void initState() {
@@ -35,6 +36,7 @@ class _DetallePedidoScreenState extends State<DetallePedidoScreen> {
         .order('creado_en');
     final fresh =
         await supa.from('pedidos').select().eq('id', p['id']).single();
+    final clis = await supa.from('clientes').select('id, nombre');
     if (!mounted) return;
     setState(() {
       _repartidores = List<Map<String, dynamic>>.from(
@@ -43,6 +45,9 @@ class _DetallePedidoScreenState extends State<DetallePedidoScreen> {
         for (final r in reps) r['id'] as String: r['nombre'] as String
       };
       _historial = List<Map<String, dynamic>>.from(hist);
+      _clientes = {
+        for (final c in clis) c['id'] as int: c['nombre'] as String
+      };
       p = fresh;
     });
   }
@@ -120,6 +125,11 @@ class _DetallePedidoScreenState extends State<DetallePedidoScreen> {
                     ],
                   ),
                   const Divider(height: 24),
+                  _fila(
+                      'Empresa',
+                      p['cliente_id'] != null
+                          ? '${_clientes[p['cliente_id']] ?? ''}${p['origen'] == 'jumpseller' ? ' (auto Jumpseller)' : ''}'
+                          : null),
                   _fila('Cliente', p['cliente_nombre']),
                   _fila('Teléfono', p['cliente_telefono']),
                   _fila('Dirección', p['direccion']),
