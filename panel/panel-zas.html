@@ -236,6 +236,29 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
   </main>
 </div>
 
+<!-- ============ VISTA REPARTIDOR (móvil) ============ -->
+<div id="repApp" style="display:none">
+  <header style="padding:10px 14px">
+    <div class="logo" style="width:34px;height:34px;font-size:17px;border-radius:9px">🛵</div>
+    <h1 id="repHola" style="font-size:15px">Mis pedidos</h1>
+    <span class="live" style="margin-left:auto"><span class="dot"></span>en vivo</span>
+    <button class="btn-ghost btn" onclick="sb.auth.signOut()">Salir</button>
+  </header>
+  <main style="max-width:640px;padding:12px" id="repLista"></main>
+</div>
+
+<!-- modal nota de entrega (repartidor) -->
+<div class="veil" id="mNota"><div class="modal" style="width:min(420px,94vw)">
+  <h2 id="nTitulo">Confirmar entrega</h2>
+  <label id="nLabel">Comentario (opcional)</label>
+  <textarea id="nTexto" rows="2"></textarea>
+  <div class="err" id="nErr"></div>
+  <div class="foot">
+    <button class="btn btn-ghost" onclick="cerrar('mNota')">Volver</button>
+    <button class="btn" id="nConfirmar">Confirmar</button>
+  </div>
+</div></div>
+
 <!-- modal nuevo pedido -->
 <div class="veil" id="mPedido"><div class="modal">
   <h2>Nuevo pedido</h2>
@@ -362,15 +385,103 @@ async function login(){
 $('salir').onclick = ()=> sb.auth.signOut();
 
 sb.auth.onAuthStateChange(async (_ev, session)=>{
-  if(!session){ $('app').style.display='none'; $('login').style.display='flex'; return; }
-  const { data:perfil } = await sb.from('perfiles').select().eq('id', session.user.id).maybeSingle();
-  if(!perfil || perfil.rol!=='admin'){
-    $('lErr').textContent='Esta cuenta no es de administrador.'; await sb.auth.signOut(); return;
+  if(!session){
+    $('app').style.display='none'; $('repApp').style.display='none';
+    $('login').style.display='flex'; return;
   }
-  $('who').textContent = perfil.nombre;
-  $('login').style.display='none'; $('app').style.display='block';
-  await cargarTodo(); suscribir();
+  const { data:perfil } = await sb.from('perfiles').select().eq('id', session.user.id).maybeSingle();
+  if(!perfil){ $('lErr').textContent='No se encontró tu perfil.'; await sb.auth.signOut(); return; }
+  if(perfil.activo===false){ $('lErr').textContent='Tu cuenta está desactivada.'; await sb.auth.signOut(); return; }
+  $('login').style.display='none';
+  if(perfil.rol==='admin'){
+    $('who').textContent = perfil.nombre;
+    $('app').style.display='block';
+    await cargarTodo(); suscribir();
+  } else {
+    $('repHola').textContent = 'Hola, '+perfil.nombre;
+    $('repApp').style.display='block';
+    await iniciarRepartidor(session.user.id);
+  }
 });
+
+/* ---------- VISTA REPARTIDOR ---------- */
+let repUid = null, repPedidos = [], repClientes = {}, repSuscrito = false;
+async function iniciarRepartidor(uid){
+  repUid = uid;
+  const { data: clis } = await sb.from('clientes').select('id, nombre, direccion_retiro, comuna');
+  repClientes = Object.fromEntries((clis||[]).map(c=>[c.id, c]));
+  await cargarRepPedidos();
+  if(!repSuscrito){
+    repSuscrito = true;
+    sb.channel('mis-pedidos').on('postgres_changes',
+      {event:'*', schema:'public', table:'pedidos', filter:`repartidor_id=eq.${uid}`},
+      ()=> cargarRepPedidos()
+    ).subscribe();
+  }
+}
+async function cargarRepPedidos(){
+  const { data } = await sb.from('pedidos').select()
+    .eq('repartidor_id', repUid).order('creado_en', {ascending:false}).limit(100);
+  repPedidos = data||[];
+  pintarRepVista();
+}
+function pintarRepVista(){
+  const activos = repPedidos.filter(p=>!FIN.includes(p.estado));
+  const listos = repPedidos.filter(p=>['entregado','no_entregado'].includes(p.estado)).slice(0,15);
+  const tarjeta = (p, activo) => {
+    const [lbl,ic,col] = EST[p.estado]||[p.estado,'•','var(--muted)'];
+    const sig = {asignado:'aceptado', aceptado:'en_camino', en_camino:'entregado'}[p.estado];
+    const sigTxt = {aceptado:'✔ Aceptar pedido', en_camino:'🛵 Iniciar reparto', entregado:'✅ Marcar entregado'}[sig];
+    const cli = p.cliente_id ? repClientes[p.cliente_id] : null;
+    const dirMapa = encodeURIComponent(p.direccion + (p.comuna?', '+p.comuna:''));
+    return `<div class="tile" style="margin-bottom:10px;padding:14px">
+      <div style="display:flex;align-items:center;gap:6px">
+        <span class="st" style="color:${col}">${ic} ${lbl}</span>
+        <span class="sp" style="flex:1"></span>
+        <span class="cod">${esc(p.codigo||'#'+p.id)}</span>
+      </div>
+      ${cli?`<div style="background:#fff4ec;border-radius:6px;padding:4px 8px;margin-top:8px;font-size:12px;color:#9a4a00">Retiro: <b>${esc(cli.nombre)}</b>${cli.direccion_retiro?' · '+esc(cli.direccion_retiro):''}</div>`:''}
+      <div style="font-weight:700;font-size:16px;margin-top:8px">${esc(p.cliente_nombre)}</div>
+      <div>${esc(p.direccion)}${p.comuna?', '+esc(p.comuna):''}</div>
+      ${p.referencia?`<div style="color:var(--ink-2)">Ref: ${esc(p.referencia)}</div>`:''}
+      ${p.detalle?`<div style="color:var(--ink-2);font-size:13px;margin-top:4px">${esc(p.detalle)}</div>`:''}
+      ${p.monto!=null?`<div style="font-weight:600;margin-top:4px">Cobrar: ${clp(p.monto)} (${p.metodo_pago||''})</div>`:''}
+      ${activo?`
+      <div style="display:flex;gap:8px;margin-top:12px;align-items:center;flex-wrap:wrap">
+        <a class="btn btn-ghost" style="text-decoration:none" target="_blank" href="https://www.google.com/maps/search/?api=1&query=${dirMapa}">🗺️ Mapa</a>
+        ${p.cliente_telefono?`<a class="btn btn-ghost" style="text-decoration:none" href="tel:${esc(p.cliente_telefono)}">📞 Llamar</a>`:''}
+        <span class="sp" style="flex:1"></span>
+        ${sig?`<button class="btn" onclick="repCambiar(${p.id}, '${sig}')">${sigTxt}</button>`:''}
+      </div>
+      ${p.estado==='en_camino'?`<div style="text-align:right;margin-top:6px"><button class="btn btn-ghost" style="color:#d03b3b" onclick="repCambiar(${p.id}, 'no_entregado')">No pude entregar</button></div>`:''}
+      `:''}
+    </div>`;
+  };
+  $('repLista').innerHTML =
+    (activos.length ? `<h3 style="margin:4px 0 10px">Pedidos activos (${activos.length})</h3>` + activos.map(p=>tarjeta(p,true)).join('') :
+      '<div class="empty">No tienes pedidos asignados por ahora.<br>Cuando te asignen uno aparecerá aquí al instante.</div>') +
+    (listos.length ? `<h3 style="margin:16px 0 10px">Terminados recientes</h3>` + listos.map(p=>tarjeta(p,false)).join('') : '');
+}
+window.repCambiar = (id, nuevo)=>{
+  if(nuevo==='entregado' || nuevo==='no_entregado'){
+    $('nTitulo').textContent = nuevo==='entregado' ? 'Confirmar entrega' : 'No entregado';
+    $('nLabel').textContent = nuevo==='entregado' ? 'Comentario (opcional)' : 'Motivo *';
+    $('nTexto').value=''; $('nErr').textContent='';
+    $('mNota').classList.add('on');
+    $('nConfirmar').onclick = async ()=>{
+      const nota = $('nTexto').value.trim();
+      if(nuevo==='no_entregado' && !nota){ $('nErr').textContent='Escribe el motivo.'; return; }
+      const cambios = { estado: nuevo }; if(nota) cambios.nota_entrega = nota;
+      const { error } = await sb.from('pedidos').update(cambios).eq('id', id);
+      if(error){ $('nErr').textContent=error.message; return; }
+      cerrar('mNota'); toast(nuevo==='entregado'?'¡Entrega registrada!':'Registrado como no entregado');
+      cargarRepPedidos();
+    };
+  } else {
+    sb.from('pedidos').update({estado:nuevo}).eq('id', id)
+      .then(({error})=>{ if(error) toast('Error: '+error.message); else cargarRepPedidos(); });
+  }
+};
 
 /* ---------- DATOS ---------- */
 async function cargarTodo(){
@@ -414,7 +525,9 @@ function pintarTiles(){
 
 function pintarRendimiento(){
   const hoy = hoyStr();
-  const reps = perfiles.filter(p=>p.rol==='repartidor');
+  // repartidores + admins que tengan pedidos asignados
+  const reps = perfiles.filter(p=>p.rol==='repartidor' ||
+    (p.rol==='admin' && pedidos.some(x=>x.repartidor_id===p.id)));
   $('tbodyRep').innerHTML = reps.length? reps.map(r=>{
     const suyos = pedidos.filter(p=>p.repartidor_id===r.id);
     const act = suyos.filter(p=>!FIN.includes(p.estado)).length;
@@ -542,7 +655,7 @@ $('nuevoPedido').onclick = ()=>{
   ['pCliente','pTel','pDir','pComuna','pMonto','pRef','pDet'].forEach(i=>$(i).value='');
   $('pErr').textContent='';
   $('pRep').innerHTML = '<option value="">Sin asignar</option>' +
-    perfiles.filter(p=>p.rol==='repartidor'&&p.activo).map(r=>`<option value="${r.id}">${esc(r.nombre)}</option>`).join('');
+    perfiles.filter(p=>p.activo).map(r=>`<option value="${r.id}">${esc(r.nombre)}${r.rol==='admin'?' (admin)':''}</option>`).join('');
   $('pEmpresa').innerHTML = '<option value="">— Pedido propio de ZAS —</option>' +
     clientes.filter(c=>c.activo).map(c=>`<option value="${c.id}">${esc(c.nombre)}</option>`).join('');
   $('mPedido').classList.add('on'); $('pCliente').focus();
@@ -566,7 +679,7 @@ $('pGuardar').onclick = async ()=>{
 window.verDetalle = async (id)=>{
   const p = pedidos.find(x=>x.id===id); if(!p) return;
   const { data:hist } = await sb.from('pedido_historial').select().eq('pedido_id',id).order('creado_en');
-  const reps = perfiles.filter(x=>x.rol==='repartidor'&&x.activo);
+  const reps = perfiles.filter(x=>x.activo).map(x=>({...x, nombre: x.nombre + (x.rol==='admin'?' (admin)':'')}));
   const filas = [
     ['Empresa', p.cliente_id? (clienteDe(p.cliente_id)||'')+(p.origen==='jumpseller'?' (⚡ pedido automático Jumpseller'+(p.externo_id?' #'+p.externo_id:'')+')':'') : null],
     ['Cliente',p.cliente_nombre],['Teléfono',p.cliente_telefono],
@@ -721,8 +834,9 @@ async function cargarReportes(){
         <span style="font-size:10px;color:var(--muted);white-space:nowrap">${repDias>14 && dias.indexOf(d)%2 ? '' : d.etiqueta}</span>
       </div>`).join('') + '</div>';
 
-  // por repartidor
-  const reps = perfiles.filter(p=>p.rol==='repartidor');
+  // por repartidor (incluye admins con entregas)
+  const reps = perfiles.filter(p=>p.rol==='repartidor' ||
+    (p.rol==='admin' && filas.some(x=>x.repartidor_id===p.id)));
   $('repPorRep').innerHTML = reps.map(r=>{
     const e = ent.filter(p=>p.repartidor_id===r.id);
     const ne = noEnt.filter(p=>p.repartidor_id===r.id).length;
