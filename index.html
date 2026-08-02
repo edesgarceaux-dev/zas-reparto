@@ -472,9 +472,10 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     <div><label>Correo de contacto</label><input id="eCorreo" type="email"></div>
   </div>
   <label>Dirección del domicilio</label><input id="eDir">
-  <label>Comuna de preferencia (opcional)</label><input id="eComuna" placeholder="Ej: La Florida">
+  <label>Comunas de preferencia (opcional, separadas por coma)</label>
+  <input id="eComuna" placeholder="Ej: La Florida, Puente Alto, La Pintana">
   <p style="color:var(--muted);font-size:11.5px;margin-top:4px">
-    ⭐ Si la defines, "🤖 Repartir auto" intentará darle el sector de esa comuna.
+    ⭐ "🤖 Repartir auto" le dará primero los pedidos de estas comunas, en ese orden de prioridad.
   </p>
   <p style="color:var(--muted);font-size:11.5px;margin-top:8px">
     ℹ️ El correo con el que <b>inicia sesión</b> no se cambia desde aquí (es el de la cuenta);
@@ -918,16 +919,22 @@ function repartirEnSectores(lista, cupos, prefs){
     ? { lat: con.reduce((s,p)=>s+p.lat,0)/con.length, lng: con.reduce((s,p)=>s+p.lng,0)/con.length }
     : null;
   const norm = s => (s||'').toString().toLowerCase().trim();
-  // con preferencia primero (para que tomen su comuna), luego por cupo mayor
-  const ordenGrupos = cupos.map((c,i)=>({c, i, pref: norm(prefs[i])}))
-    .sort((a,b)=> (b.pref?1:0)-(a.pref?1:0) || b.c-a.c);
+  // varias comunas por repartidor: "La Florida, Puente Alto" → lista con prioridad por orden
+  const parsePrefs = s => norm(s).split(',').map(x=>x.trim()).filter(Boolean);
+  const coincide = (p, comuna) => {
+    const c = norm(p.comuna);
+    return !!c && (c.includes(comuna) || comuna.includes(c));
+  };
+  // con preferencia primero (para que tomen sus comunas), luego por cupo mayor
+  const ordenGrupos = cupos.map((c,i)=>({c, i, pref: parsePrefs(prefs[i])}))
+    .sort((a,b)=> (b.pref.length?1:0)-(a.pref.length?1:0) || b.c-a.c);
   for(const {c, i, pref} of ordenGrupos){
     if(!restantes.length || c<=0) continue;
     let semilla = null;
-    if(pref){
-      // semilla dentro de su comuna preferida (si queda alguno)
-      const deComuna = restantes.filter(p=>norm(p.comuna).includes(pref) || pref.includes(norm(p.comuna)||'~'));
-      if(deComuna.length) semilla = deComuna[0];
+    // semilla: primera comuna de su lista que aún tenga pedidos
+    for(const comuna of pref){
+      semilla = restantes.find(p=>coincide(p, comuna));
+      if(semilla) break;
     }
     if(!semilla){
       semilla = restantes[0];
@@ -937,19 +944,21 @@ function repartirEnSectores(lista, cupos, prefs){
     }
     const grupo = [semilla];
     restantes = restantes.filter(p=>p!==semilla);
-    // primero llenar con el resto de su comuna preferida (lo más cercano primero)
     while(grupo.length < c && restantes.length){
       const gx = grupo.reduce((s,p)=>s+p.lat,0)/grupo.length;
       const gy = grupo.reduce((s,p)=>s+p.lng,0)/grupo.length;
       let mejor = -1, mejorD = Infinity;
-      if(pref){
+      // 1) llenar con sus comunas preferidas, en orden de prioridad
+      for(const comuna of pref){
         for(let k=0;k<restantes.length;k++){
-          if(!norm(restantes[k].comuna).includes(pref)) continue;
+          if(!coincide(restantes[k], comuna)) continue;
           const d = distKm(restantes[k], {lat:gx, lng:gy});
           if(d < mejorD){ mejorD = d; mejor = k; }
         }
+        if(mejor >= 0) break; // hay pedidos de esta comuna: no pasar a la siguiente
       }
-      if(mejor < 0){ // ya no quedan de su comuna: seguir por cercanía normal
+      // 2) si ya no quedan de sus comunas: seguir por cercanía normal
+      if(mejor < 0){
         mejorD = Infinity;
         for(let k=0;k<restantes.length;k++){
           const d = distKm(restantes[k], {lat:gx, lng:gy});
@@ -1748,38 +1757,84 @@ function iniciarMapa(){
     capaPuntos = L.layerGroup().addTo(mapa);
     capaLinea = L.layerGroup().addTo(mapa);
     try{ const g = JSON.parse(localStorage.getItem('zas-partida')||'null'); if(g) puntoPartida = g; }catch(_){}
-    try{ const g2 = JSON.parse(localStorage.getItem('zas-termino')||'null'); if(g2) puntoTermino = g2; }catch(_){}
+    try{ const g2 = JSON.parse(localStorage.getItem('zas-termino')||'null'); if(g2) terminoGlobal = g2; }catch(_){}
   }
   setTimeout(()=>mapa.invalidateSize(), 100);
   poblarSelectorRuta();
   poblarSelectorPartida();
+  sincronizarTermino();
   poblarSelectorTermino();
   dibujarRuta();
   geocodificarFaltantes();
 }
 
-/* ----- punto de término (opcional: terminar cerca de casa) ----- */
-let puntoTermino = null;
+/* ----- punto de término POR REPARTIDOR (cada uno cierra hacia su lugar) ----- */
+let puntoTermino = null;    // el que aplica a la ruta que se está viendo
+let terminoGlobal = null;   // para la vista "Sin asignar" (localStorage, como antes)
+function sincronizarTermino(){
+  const rep = $('rutaRep').value;
+  if(rep){
+    const r = perfiles.find(x=>x.id===rep);
+    puntoTermino = (r && r.termino_lat!=null && r.termino_lng!=null)
+      ? { lat:r.termino_lat, lng:r.termino_lng,
+          nombre: r.termino_nombre || ('Término de '+(r.nombre||'').split(' ')[0]) }
+      : null;
+  } else {
+    puntoTermino = terminoGlobal;
+  }
+}
 function poblarSelectorTermino(){
   const sel = $('selTermino');
-  sel.innerHTML = `<option value="">🏁 Término: ${puntoTermino ? esc(puntoTermino.nombre) : 'libre'}</option>` +
+  const rep = $('rutaRep').value;
+  const r = rep ? perfiles.find(x=>x.id===rep) : null;
+  sel.innerHTML = `<option value="">🏁 Término${r?' de '+esc((r.nombre||'').split(' ')[0]):''}: ${puntoTermino ? esc(puntoTermino.nombre) : 'libre'}</option>` +
+    (r && r.direccion ? `<option value="casa">🏠 Su casa (${esc(r.direccion)})</option>` : '') +
     `<option value="mapa">🖱️ Elegir con un clic en el mapa</option>` +
     (puntoTermino ? `<option value="quitar">✕ Quitar punto de término</option>` : '');
   sel.value = '';
 }
-window.elegirTermino = ()=>{
+window.elegirTermino = async ()=>{
   const v = $('selTermino').value;
   if(!v) return;
-  if(v === 'quitar'){
-    puntoTermino = null; localStorage.removeItem('zas-termino');
-    poblarSelectorTermino(); dibujarRuta(); return;
+  const rep = $('rutaRep').value;
+  // guarda el término: en la FICHA del repartidor (queda para siempre) o global si es "Sin asignar"
+  const guardar = async (t)=>{
+    puntoTermino = t;
+    if(rep){
+      const r = perfiles.find(x=>x.id===rep);
+      const datos = t
+        ? { termino_lat:t.lat, termino_lng:t.lng, termino_nombre:t.nombre }
+        : { termino_lat:null, termino_lng:null, termino_nombre:null };
+      const { error } = await sb.from('perfiles').update(datos).eq('id', rep);
+      if(error && /column/i.test(error.message)){
+        toast('⚠️ Ejecuta migracion-perfiles.sql para guardar el término por repartidor');
+      } else if(r){ Object.assign(r, datos); }
+    } else {
+      if(t) localStorage.setItem('zas-termino', JSON.stringify(t));
+      else localStorage.removeItem('zas-termino');
+      terminoGlobal = t;
+    }
+    poblarSelectorTermino(); dibujarRuta();
+  };
+  if(v === 'quitar'){ $('selTermino').value=''; await guardar(null); return; }
+  if(v === 'casa'){
+    $('selTermino').value='';
+    const r = perfiles.find(x=>x.id===rep);
+    if(!r?.direccion) return;
+    toast('Buscando la dirección de su casa…');
+    try{
+      const partes = r.direccion.split(',');
+      const c = await buscarCoordenadas(r.direccion, partes[1]?.trim() || '');
+      if(c) await guardar({ lat:c.lat, lng:c.lng, nombre:'Casa de '+(r.nombre||'').split(' ')[0] });
+      else toast('No se encontró su dirección — usa "Elegir con un clic" y márcala a mano');
+    }catch(_){ toast('Error al buscar la dirección — intenta con un clic en el mapa'); }
+    return;
   }
   if(v === 'mapa'){
-    toast('Haz clic en el mapa donde quieres que TERMINE la ruta');
-    mapa.once('click', e=>{
-      puntoTermino = { lat: e.latlng.lat, lng: e.latlng.lng, nombre: 'Punto de término' };
-      localStorage.setItem('zas-termino', JSON.stringify(puntoTermino));
-      poblarSelectorTermino(); dibujarRuta();
+    toast('Haz clic en el mapa donde quieres que TERMINE la ruta' + (rep ? ' de este repartidor' : ''));
+    mapa.once('click', async e=>{
+      await guardar({ lat: e.latlng.lat, lng: e.latlng.lng,
+        nombre: rep ? 'Término de '+nombreDe(rep).split(' ')[0] : 'Punto de término' });
       toast('Punto de término fijado — la ruta cerrará hacia ahí');
     });
     $('selTermino').value='';
@@ -2267,7 +2322,11 @@ window.guardarOrden = async ()=>{
   $('btnGuardarOrden').style.display = 'none';
   cargarTodo();
 };
-$('rutaRep').addEventListener('change', ()=>{ ordenPropuesto=null; $('btnGuardarOrden').style.display='none'; });
+$('rutaRep').addEventListener('change', ()=>{
+  ordenPropuesto=null; $('btnGuardarOrden').style.display='none';
+  // cada repartidor tiene su propio punto de término
+  sincronizarTermino(); poblarSelectorTermino(); dibujarRuta();
+});
 
 /* ---------- REPORTES ---------- */
 let repDias = 7;

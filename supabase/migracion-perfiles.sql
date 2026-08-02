@@ -6,8 +6,13 @@
 -- Datos de contacto del repartidor (editables desde el panel)
 alter table public.perfiles add column if not exists direccion text;
 alter table public.perfiles add column if not exists correo text;
--- Comuna de preferencia: "Repartir auto" intenta darle el sector de esa comuna
+-- Comunas de preferencia (separadas por coma): "Repartir auto" intenta darle esos sectores
 alter table public.perfiles add column if not exists comuna_preferida text;
+
+-- Punto de término propio de cada repartidor (la ruta cierra hacia ahí, ej: su casa)
+alter table public.perfiles add column if not exists termino_lat double precision;
+alter table public.perfiles add column if not exists termino_lng double precision;
+alter table public.perfiles add column if not exists termino_nombre text;
 
 -- Rellenar el correo de contacto con el correo de acceso actual
 update public.perfiles p
