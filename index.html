@@ -210,7 +210,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     <section id="t-mapa" style="display:none">
       <div class="bar">
         <select id="rutaRep" style="width:auto;min-width:200px" onchange="dibujarRuta()"></select>
-        <select id="selPartida" style="width:auto;min-width:200px" onchange="elegirPartida()"></select>
+        <select id="selPartida" style="width:auto;min-width:180px" onchange="elegirPartida()"></select>
+        <select id="selTermino" style="width:auto;min-width:180px" onchange="elegirTermino()"></select>
         <button class="btn" id="btnOptimizar" onclick="optimizarRuta()">✨ Optimizar ruta</button>
         <button class="btn btn-ghost" id="btnGuardarOrden" onclick="guardarOrden()" style="display:none">💾 Guardar este orden</button>
         <span class="sp"></span>
@@ -914,13 +915,43 @@ function iniciarMapa(){
     capaPuntos = L.layerGroup().addTo(mapa);
     capaLinea = L.layerGroup().addTo(mapa);
     try{ const g = JSON.parse(localStorage.getItem('zas-partida')||'null'); if(g) puntoPartida = g; }catch(_){}
+    try{ const g2 = JSON.parse(localStorage.getItem('zas-termino')||'null'); if(g2) puntoTermino = g2; }catch(_){}
   }
   setTimeout(()=>mapa.invalidateSize(), 100);
   poblarSelectorRuta();
   poblarSelectorPartida();
+  poblarSelectorTermino();
   dibujarRuta();
   geocodificarFaltantes();
 }
+
+/* ----- punto de término (opcional: terminar cerca de casa) ----- */
+let puntoTermino = null;
+function poblarSelectorTermino(){
+  const sel = $('selTermino');
+  sel.innerHTML = `<option value="">🏁 Término: ${puntoTermino ? esc(puntoTermino.nombre) : 'libre'}</option>` +
+    `<option value="mapa">🖱️ Elegir con un clic en el mapa</option>` +
+    (puntoTermino ? `<option value="quitar">✕ Quitar punto de término</option>` : '');
+  sel.value = '';
+}
+window.elegirTermino = ()=>{
+  const v = $('selTermino').value;
+  if(!v) return;
+  if(v === 'quitar'){
+    puntoTermino = null; localStorage.removeItem('zas-termino');
+    poblarSelectorTermino(); dibujarRuta(); return;
+  }
+  if(v === 'mapa'){
+    toast('Haz clic en el mapa donde quieres que TERMINE la ruta');
+    mapa.once('click', e=>{
+      puntoTermino = { lat: e.latlng.lat, lng: e.latlng.lng, nombre: 'Punto de término' };
+      localStorage.setItem('zas-termino', JSON.stringify(puntoTermino));
+      poblarSelectorTermino(); dibujarRuta();
+      toast('Punto de término fijado — la ruta cerrará hacia ahí');
+    });
+    $('selTermino').value='';
+  }
+};
 
 /* ----- punto de partida (bodega) ----- */
 function poblarSelectorPartida(){
@@ -1023,7 +1054,14 @@ function dibujarRuta(){
     L.marker([puntoPartida.lat, puntoPartida.lng], {icon:iconoCasa}).addTo(capaPuntos)
       .bindPopup(`<b>Punto de partida</b><br>${esc(puntoPartida.nombre)}`);
   }
-  const trayecto = puntoPartida ? [[puntoPartida.lat,puntoPartida.lng], ...puntosActivos] : puntosActivos;
+  if(puntoTermino){
+    const iconoMeta = L.divIcon({ className:'', iconSize:[30,30], iconAnchor:[15,15],
+      html:`<div style="width:30px;height:30px;border-radius:8px;background:#0ca30c;color:#fff;display:flex;align-items:center;justify-content:center;font-size:15px;border:2px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.4)">🏁</div>` });
+    L.marker([puntoTermino.lat, puntoTermino.lng], {icon:iconoMeta}).addTo(capaPuntos)
+      .bindPopup(`<b>Punto de término</b><br>${esc(puntoTermino.nombre)}`);
+  }
+  let trayecto = puntoPartida ? [[puntoPartida.lat,puntoPartida.lng], ...puntosActivos] : puntosActivos;
+  if(puntoTermino && puntosActivos.length) trayecto = [...trayecto, [puntoTermino.lat, puntoTermino.lng]];
   if(trayecto.length>1){
     L.polyline(trayecto, {color:'#e85d04', weight:3, opacity:.75, dashArray:'6 8'}).addTo(capaLinea);
     let km = 0;
@@ -1043,7 +1081,10 @@ function pintarListaOrden(activos){
   const el = $('listaOrden');
   if(!activos.length){ el.innerHTML = '<span class="cod">No hay paradas activas para esta selección.</span>'; return; }
   el.innerHTML = activos.map((p,i)=>`
-    <div style="display:flex;align-items:center;gap:6px;padding:5px 0;border-bottom:1px dashed var(--grid);font-size:12px">
+    <div draggable="true" ondragstart="dragIni(${i})" ondragover="event.preventDefault();this.style.borderTop='2px solid var(--brand)'"
+         ondragleave="this.style.borderTop=''" ondrop="this.style.borderTop='';dragFin(${i})"
+         style="display:flex;align-items:center;gap:6px;padding:5px 0;border-bottom:1px dashed var(--grid);font-size:12px;cursor:grab">
+      <span style="color:var(--muted);cursor:grab" title="Arrastra para reordenar">⠿</span>
       <span style="background:${p.lat!=null?'var(--brand)':'#c3c2b7'};color:#fff;border-radius:99px;min-width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center;font-weight:700">${i+1}</span>
       <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(p.direccion)}">
         <b>${esc(p.cliente_nombre)}</b> · ${esc(p.comuna||p.direccion)}${p.lat==null?' ⚠️':''}
@@ -1052,6 +1093,18 @@ function pintarListaOrden(activos){
       <button class="btn btn-ghost" style="padding:1px 7px" ${i===activos.length-1?'disabled':''} onclick="moverParada(${i},1)">▼</button>
     </div>`).join('');
 }
+let dragIdx = null;
+window.dragIni = i => { dragIdx = i; };
+window.dragFin = i => {
+  if(dragIdx===null || dragIdx===i){ dragIdx=null; return; }
+  const activos = ordenarParaRuta(pedidosDeRuta()).filter(p=>!FIN.includes(p.estado));
+  const orden = activos.map(p=>p.id);
+  const [mov] = orden.splice(dragIdx, 1);
+  orden.splice(i, 0, mov);
+  ordenPropuesto = orden; dragIdx = null;
+  $('btnGuardarOrden').style.display = 'inline-block';
+  dibujarRuta();
+};
 window.moverParada = (i, dir)=>{
   const activos = ordenarParaRuta(pedidosDeRuta()).filter(p=>!FIN.includes(p.estado));
   const orden = activos.map(p=>p.id);
@@ -1072,11 +1125,51 @@ function pintarSinUbicar(){
     <div style="border:1px solid var(--grid);border-radius:8px;padding:8px;margin-bottom:8px;font-size:12px">
       <b>${esc(p.codigo||'#'+p.id)}</b> · ${esc(p.cliente_nombre)}
       <div style="color:#d03b3b;margin:2px 0">${esc(geoFallos[p.id] || 'Pendiente de ubicar (abre el mapa y espera)')}</div>
-      <input id="fixDir-${p.id}" value="${esc(p.direccion)}" style="margin:3px 0;font-size:12px;padding:5px 8px" placeholder="Dirección">
+      <input id="fixDir-${p.id}" value="${esc(p.direccion)}" style="margin:3px 0;font-size:12px;padding:5px 8px" placeholder="Dirección" oninput="sugerirDireccion(${p.id})" autocomplete="off">
+      <div id="fixSug-${p.id}"></div>
       <input id="fixCom-${p.id}" value="${esc(p.comuna||'')}" style="margin:0 0 5px;font-size:12px;padding:5px 8px" placeholder="Comuna">
       <button class="btn" style="padding:4px 12px;font-size:12px" onclick="corregirDireccion(${p.id})">Reintentar ubicación</button>
     </div>`).join('');
 }
+
+/* sugerencias mientras escribes (buscador de direcciones Photon/OpenStreetMap) */
+let sugTimer = null;
+window.sugerirDireccion = (id)=>{
+  clearTimeout(sugTimer);
+  sugTimer = setTimeout(async ()=>{
+    const texto = $('fixDir-'+id)?.value.trim();
+    if(!texto || texto.length < 5){ if($('fixSug-'+id)) $('fixSug-'+id).innerHTML=''; return; }
+    try{
+      const com = $('fixCom-'+id)?.value.trim() || '';
+      const r = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(texto+' '+com+' Chile')}&limit=4&lat=-33.45&lon=-70.66`);
+      const g = await r.json();
+      const ops = (g.features||[]).filter(f=>f.properties?.countrycode==='CL').map(f=>{
+        const pr = f.properties;
+        const linea1 = [pr.street||pr.name, pr.housenumber].filter(Boolean).join(' ');
+        const comuna = pr.city || pr.district || pr.county || '';
+        const [lng, lat] = f.geometry.coordinates;
+        return { linea1, comuna, lat, lng, etiqueta: `${linea1}${comuna?', '+comuna:''}` };
+      }).filter(o=>o.linea1);
+      const caja = $('fixSug-'+id);
+      if(!caja) return;
+      caja.innerHTML = ops.length ? ops.map(o=>
+        `<div onclick='usarSugerencia(${id}, ${JSON.stringify(JSON.stringify(o))})'
+          style="padding:5px 8px;border:1px solid var(--grid);border-radius:6px;margin:2px 0;cursor:pointer;background:#fff"
+          onmouseover="this.style.background='#f0efec'" onmouseout="this.style.background='#fff'">📍 ${esc(o.etiqueta)}</div>`).join('')
+        : '<div class="cod" style="padding:2px">Sin coincidencias aún…</div>';
+    }catch(_){}
+  }, 500);
+};
+window.usarSugerencia = async (id, jsonStr)=>{
+  const o = JSON.parse(jsonStr);
+  const p = pedidos.find(x=>x.id===id); if(!p) return;
+  const cambios = { direccion:o.linea1, comuna:o.comuna||null, lat:o.lat, lng:o.lng };
+  const { error } = await sb.from('pedidos').update(cambios).eq('id', id);
+  if(error){ toast('Error al guardar: '+error.message); return; }
+  Object.assign(p, cambios); delete geoFallos[id];
+  toast('Dirección corregida y ubicada ✓');
+  dibujarRuta();
+};
 window.corregirDireccion = async (id)=>{
   const p = pedidos.find(x=>x.id===id); if(!p) return;
   const dir = $('fixDir-'+id).value.trim(), com = $('fixCom-'+id).value.trim();
@@ -1150,6 +1243,7 @@ window.optimizarRuta = ()=>{
   const kmDe = ruta => {
     let km = distKm(inicio, ruta[0]);
     for(let i=1;i<ruta.length;i++) km += distKm(ruta[i-1], ruta[i]);
+    if(puntoTermino) km += distKm(ruta[ruta.length-1], puntoTermino);
     return km;
   };
   const kmAntes = kmDe(ordenarParaRuta(activos));
