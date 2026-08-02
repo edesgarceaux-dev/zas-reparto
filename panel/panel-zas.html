@@ -1028,7 +1028,9 @@ window.corregirDireccionPedido = async (id)=>{
   if(error){ $('dDirEstado').innerHTML=`<span style="color:#d03b3b">${error.message}</span>`; return; }
   const p = pedidos.find(x=>x.id===id); if(p) Object.assign(p, cambios);
   $('dDirEstado').innerHTML = coords
-    ? '<span style="color:#006300">✓ Dirección corregida y ubicada en el mapa</span>'
+    ? (coords.tipo==='calle'
+        ? '<span style="color:#b45b00">✓ Ubicada a nivel de CALLE (el número no está en el mapa) — el punto quedará aproximado</span>'
+        : '<span style="color:#006300">✓ Dirección corregida y ubicada en el mapa</span>')
     : '<span style="color:#b45b00">Guardada, pero no se encontró en el mapa — corrígela en la pestaña Mapa o revisa la escritura</span>';
   toast('Dirección actualizada');
   pintarPedidos();
@@ -1397,7 +1399,7 @@ window.corregirDireccion = async (id)=>{
       if(error){ toast('Error al guardar: '+error.message); }
       else {
         Object.assign(p, cambios); delete geoFallos[id];
-        toast('Dirección ubicada y corregida ✓');
+        toast(r.tipo==='calle' ? 'Ubicada a nivel de CALLE (número no mapeado) — punto aproximado' : 'Dirección ubicada y corregida ✓');
         dibujarRuta();
       }
     } else {
@@ -1411,37 +1413,55 @@ window.corregirDireccion = async (id)=>{
   $('geoEstado').textContent = '';
 }
 
-/* búsqueda de coordenadas afinada: 4 estrategias en cadena */
+/* búsqueda de coordenadas afinada: abreviaturas chilenas + 7 estrategias en cadena */
+function expandirAbreviaturas(d){
+  const mapa = [
+    [/\bpdte\b\.?/gi,'Presidente'], [/\bpte\b\.?/gi,'Presidente'],
+    [/\bgral\b\.?/gi,'General'], [/\bav(da)?\b\.?/gi,'Avenida'],
+    [/\bpje\b\.?/gi,'Pasaje'], [/\bsta\b\.?/gi,'Santa'], [/\bsto\b\.?/gi,'Santo'],
+    [/\bfco\b\.?/gi,'Francisco'], [/\bdr\b\.?/gi,'Doctor'],
+    [/\bcmdte\b\.?/gi,'Comandante'], [/\bsgto\b\.?/gi,'Sargento'],
+    [/\balm\b\.?/gi,'Almirante'], [/\bmons\b\.?/gi,'Monseñor'],
+    [/\bhnos\b\.?/gi,'Hermanos'],
+  ];
+  let r = d;
+  for(const [re, palabra] of mapa) r = r.replace(re, palabra);
+  return r.replace(/\s+/g,' ').trim();
+}
 async function buscarCoordenadas(dir, comuna){
   const limpia = dir.split(',')[0]
     .replace(/\b(depto\.?|dpto\.?|departamento|casa|block|bloque|torre|oficina|of\.)\s*\S*/gi,'')
     .trim();
+  const expandida = expandirAbreviaturas(limpia);
+  // sin el título del nombre de calle (a veces OSM la registra distinto: Pdte./Gral./etc)
+  const sinTitulo = expandida.replace(/^(presidente|general|avenida|pasaje|calle|doctor|comandante|sargento|almirante|monseñor|don|doña)\.?\s+/i,'').trim();
+  const sinNumero = expandida.replace(/\s+\d+\S*\s*$/,'').trim();
+  const sinTituloNiNumero = sinTitulo.replace(/\s+\d+\S*\s*$/,'').trim();
+
+  const osm = async (params)=>{
+    const g = await (await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=cl&${params}`)).json();
+    return g?.[0] ? {lat:+g[0].lat, lng:+g[0].lon} : null;
+  };
+  const photon = async (q)=>{
+    const g = await (await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=1&lat=-33.45&lon=-70.66`)).json();
+    const f = (g.features||[]).find(x=>x.properties?.countrycode==='CL');
+    return f ? {lat:f.geometry.coordinates[1], lng:f.geometry.coordinates[0]} : null;
+  };
+  const com = comuna||'';
   const intentos = [
-    // 1) OSM estructurada (calle y comuna por separado — la más precisa)
-    async ()=>{
-      const g = await (await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=cl&street=${encodeURIComponent(limpia)}&city=${encodeURIComponent(comuna||'')}`)).json();
-      return g?.[0] ? {lat:+g[0].lat, lng:+g[0].lon} : null;
-    },
-    // 2) OSM libre con la dirección original
-    async ()=>{
-      const g = await (await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=cl&q=${encodeURIComponent(`${dir}, ${comuna||''}, Chile`)}`)).json();
-      return g?.[0] ? {lat:+g[0].lat, lng:+g[0].lon} : null;
-    },
-    // 3) OSM libre con la dirección limpia (sin depto/casa/etc)
-    async ()=>{
-      const g = await (await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=cl&q=${encodeURIComponent(`${limpia}, ${comuna||''}, Chile`)}`)).json();
-      return g?.[0] ? {lat:+g[0].lat, lng:+g[0].lon} : null;
-    },
-    // 4) Photon (tolera errores de escritura, estilo Google)
-    async ()=>{
-      const g = await (await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(`${limpia} ${comuna||''} Chile`)}&limit=1&lat=-33.45&lon=-70.66`)).json();
-      const f = (g.features||[]).find(x=>x.properties?.countrycode==='CL');
-      return f ? {lat:f.geometry.coordinates[1], lng:f.geometry.coordinates[0]} : null;
-    },
+    // exactas (con número)
+    ['exacta', ()=>osm(`street=${encodeURIComponent(expandida)}&city=${encodeURIComponent(com)}`)],
+    ['exacta', ()=>osm(`q=${encodeURIComponent(`${dir}, ${com}, Chile`)}`)],
+    ['exacta', ()=>osm(`q=${encodeURIComponent(`${expandida}, ${com}, Chile`)}`)],
+    ['exacta', ()=>photon(`${expandida} ${com} Chile`)],
+    ...(sinTitulo!==expandida ? [['exacta', ()=>osm(`q=${encodeURIComponent(`${sinTitulo}, ${com}, Chile`)}`)]] : []),
+    // aproximadas (nivel de calle, cuando el número no está en el mapa)
+    ...(sinNumero && sinNumero!==expandida ? [['calle', ()=>osm(`q=${encodeURIComponent(`${sinNumero}, ${com}, Chile`)}`)]] : []),
+    ...(sinTituloNiNumero && sinTituloNiNumero!==sinNumero ? [['calle', ()=>osm(`q=${encodeURIComponent(`${sinTituloNiNumero}, ${com}, Chile`)}`)]] : []),
   ];
-  for(const intento of intentos){
-    try{ const r = await intento(); if(r) return r; }catch(_){}
-    await new Promise(res=>setTimeout(res, 400));
+  for(const [tipo, intento] of intentos){
+    try{ const r = await intento(); if(r) return {...r, tipo}; }catch(_){}
+    await new Promise(res=>setTimeout(res, 350));
   }
   return null;
 }

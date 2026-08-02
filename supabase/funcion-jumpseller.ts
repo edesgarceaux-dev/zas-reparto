@@ -46,11 +46,23 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
 
-    // Coordenadas: cadena de 3 estrategias (estructurada -> libre -> Photon)
+    // Coordenadas: abreviaturas chilenas expandidas + cadena de estrategias
     let lat: number | null = null, lng: number | null = null;
-    const dirLimpia = direccion.split(",")[0]
+    let dirLimpia = direccion.split(",")[0]
       .replace(/\b(depto\.?|dpto\.?|departamento|casa|block|bloque|torre|oficina|of\.)\s*\S*/gi, "")
       .trim();
+    const abrev: [RegExp, string][] = [
+      [/\bpdte\b\.?/gi, "Presidente"], [/\bpte\b\.?/gi, "Presidente"],
+      [/\bgral\b\.?/gi, "General"], [/\bav(da)?\b\.?/gi, "Avenida"],
+      [/\bpje\b\.?/gi, "Pasaje"], [/\bsta\b\.?/gi, "Santa"], [/\bsto\b\.?/gi, "Santo"],
+      [/\bfco\b\.?/gi, "Francisco"], [/\bdr\b\.?/gi, "Doctor"],
+      [/\bcmdte\b\.?/gi, "Comandante"], [/\bsgto\b\.?/gi, "Sargento"],
+      [/\balm\b\.?/gi, "Almirante"], [/\bmons\b\.?/gi, "Monseñor"],
+    ];
+    for (const [re, palabra] of abrev) dirLimpia = dirLimpia.replace(re, palabra);
+    dirLimpia = dirLimpia.replace(/\s+/g, " ").trim();
+    const sinTitulo = dirLimpia.replace(/^(presidente|general|avenida|pasaje|calle|doctor|comandante|sargento|almirante|monseñor|don|doña)\.?\s+/i, "").trim();
+    const sinNumero = dirLimpia.replace(/\s+\d+\S*\s*$/, "").trim();
     const traer = async (url: string) => {
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), 3000);
@@ -74,6 +86,16 @@ Deno.serve(async (req) => {
       const ph = await traer(`https://photon.komoot.io/api/?q=${encodeURIComponent(`${dirLimpia} ${comuna ?? ""} Chile`)}&limit=1&lat=-33.45&lon=-70.66`);
       const f = (ph?.features ?? []).find((x: any) => x?.properties?.countrycode === "CL");
       if (f) { lat = f.geometry.coordinates[1]; lng = f.geometry.coordinates[0]; }
+    }
+    // 4) sin el título del nombre (Pdte/Gral a veces difieren en el mapa)
+    if (lat == null && sinTitulo !== dirLimpia) {
+      g = await traer(`https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=cl&q=${encodeURIComponent(`${sinTitulo}, ${comuna ?? ""}, Chile`)}`);
+      if (g?.[0]) { lat = +g[0].lat; lng = +g[0].lon; }
+    }
+    // 5) último recurso: nivel de calle (sin número)
+    if (lat == null && sinNumero && sinNumero !== dirLimpia) {
+      g = await traer(`https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=cl&q=${encodeURIComponent(`${sinNumero}, ${comuna ?? ""}, Chile`)}`);
+      if (g?.[0]) { lat = +g[0].lat; lng = +g[0].lon; }
     }
 
     // Fecha y hora reales del pedido en la tienda
