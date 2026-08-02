@@ -362,6 +362,14 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
   <label>Notas</label><textarea id="cNotas" rows="2"></textarea>
   <label>Hora de corte (pedidos pagados después de esta hora quedan para el día siguiente)</label>
   <input id="cCorte" type="time">
+  <label>Días de despacho (los pedidos saltan automáticamente los días desmarcados)</label>
+  <div id="cDias" style="display:flex;gap:6px"></div>
+  <script>
+    document.getElementById('cDias').innerHTML = ['L','M','X','J','V','S','D'].map((d,i)=>
+      `<label style="flex:1;text-align:center;border:1px solid var(--grid);border-radius:8px;padding:7px 0;cursor:pointer;margin:0;font-size:13px;user-select:none">
+        <input type="checkbox" data-dia="${i}" style="display:none" onchange="this.parentElement.style.background=this.checked?'#FFF1E8':'';this.parentElement.style.borderColor=this.checked?'var(--brand)':'var(--grid)';this.parentElement.style.fontWeight=this.checked?'700':'400'">${d}
+      </label>`).join('');
+  </script>
   <label>Integración</label>
   <select id="cInteg">
     <option value="manual">Manual (sin tienda online)</option>
@@ -683,7 +691,7 @@ function pintarClientes(){
       <td><b>${esc(c.nombre)}</b>${c.rut?`<br><span class="cod">${esc(c.rut)}</span>`:''}${c.activo?'':' <span class="cod">(inactivo)</span>'}</td>
       <td>${esc(c.telefono||'')}${c.email?`<br><span class="cod">${esc(c.email)}</span>`:''}</td>
       <td>${esc(c.direccion_retiro||'—')}${c.comuna?`, ${esc(c.comuna)}`:''}</td>
-      <td>${c.integracion==='jumpseller'?'🛒 Jumpseller':'✍️ Manual'}${c.hora_corte?`<br><span class="cod">corte ${esc(c.hora_corte.slice(0,5))}</span>`:''}</td>
+      <td>${c.integracion==='jumpseller'?'🛒 Jumpseller':'✍️ Manual'}${c.hora_corte?`<br><span class="cod">corte ${esc(c.hora_corte.slice(0,5))}</span>`:''}${c.dias_despacho&&c.dias_despacho!=='1111111'?`<br><span class="cod">${['L','M','X','J','V','S','D'].filter((_,i)=>c.dias_despacho[i]!=='0').join('·')}</span>`:''}</td>
       <td>${deHoy}</td>
       <td><button class="btn btn-ghost" onclick="editarCliente(${c.id})">Editar</button></td>
     </tr>`;
@@ -699,6 +707,11 @@ function abrirModalCliente(c){
   $('cDir').value = c?.direccion_retiro||''; $('cComuna').value = c?.comuna||'';
   $('cNotas').value = c?.notas||''; $('cInteg').value = c?.integracion||'manual';
   $('cCorte').value = c?.hora_corte ? c.hora_corte.slice(0,5) : '';
+  const dias = c?.dias_despacho || '1111111';
+  document.querySelectorAll('#cDias input').forEach((ch,i)=>{
+    ch.checked = dias[i] !== '0';
+    ch.dispatchEvent(new Event('change'));
+  });
   $('cErr').textContent='';
   cLat = c?.lat ?? null; cLng = c?.lng ?? null;
   actualizarWebhookBox();
@@ -789,13 +802,14 @@ $('cGuardar').onclick = async ()=>{
     notas:$('cNotas').value.trim()||null, integracion:$('cInteg').value,
     lat:cLat, lng:cLng,
     hora_corte:$('cCorte').value||null,
+    dias_despacho:[...document.querySelectorAll('#cDias input')].map(ch=>ch.checked?'1':'0').join(''),
   };
   let q = clienteEditando
     ? sb.from('clientes').update(datos).eq('id', clienteEditando)
     : sb.from('clientes').insert(datos);
   let { error } = await q;
-  if(error && /column .*(lat|lng|hora_corte)/i.test(error.message)){
-    delete datos.lat; delete datos.lng; delete datos.hora_corte; // falta alguna migración
+  if(error && /column .*(lat|lng|hora_corte|dias_despacho)/i.test(error.message)){
+    delete datos.lat; delete datos.lng; delete datos.hora_corte; delete datos.dias_despacho; // falta alguna migración
     ({ error } = await (clienteEditando
       ? sb.from('clientes').update(datos).eq('id', clienteEditando)
       : sb.from('clientes').insert(datos)));
@@ -1300,11 +1314,9 @@ window.corregirDireccion = async (id)=>{
   if(!dir){ toast('Escribe una dirección'); return; }
   $('geoEstado').textContent = 'Buscando dirección corregida…';
   try{
-    const q = encodeURIComponent(`${dir}, ${com||''}, Chile`);
-    const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=cl&q=${q}`);
-    const g = await r.json();
-    if(g?.[0]){
-      const cambios = { direccion:dir, comuna:com||null, lat:+g[0].lat, lng:+g[0].lon };
+    const r = await buscarCoordenadas(dir, com);
+    if(r){
+      const cambios = { direccion:dir, comuna:com||null, lat:r.lat, lng:r.lng };
       const { error } = await sb.from('pedidos').update(cambios).eq('id', id);
       if(error){ toast('Error al guardar: '+error.message); }
       else {
@@ -1323,6 +1335,41 @@ window.corregirDireccion = async (id)=>{
   $('geoEstado').textContent = '';
 }
 
+/* búsqueda de coordenadas afinada: 4 estrategias en cadena */
+async function buscarCoordenadas(dir, comuna){
+  const limpia = dir.split(',')[0]
+    .replace(/\b(depto\.?|dpto\.?|departamento|casa|block|bloque|torre|oficina|of\.)\s*\S*/gi,'')
+    .trim();
+  const intentos = [
+    // 1) OSM estructurada (calle y comuna por separado — la más precisa)
+    async ()=>{
+      const g = await (await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=cl&street=${encodeURIComponent(limpia)}&city=${encodeURIComponent(comuna||'')}`)).json();
+      return g?.[0] ? {lat:+g[0].lat, lng:+g[0].lon} : null;
+    },
+    // 2) OSM libre con la dirección original
+    async ()=>{
+      const g = await (await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=cl&q=${encodeURIComponent(`${dir}, ${comuna||''}, Chile`)}`)).json();
+      return g?.[0] ? {lat:+g[0].lat, lng:+g[0].lon} : null;
+    },
+    // 3) OSM libre con la dirección limpia (sin depto/casa/etc)
+    async ()=>{
+      const g = await (await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=cl&q=${encodeURIComponent(`${limpia}, ${comuna||''}, Chile`)}`)).json();
+      return g?.[0] ? {lat:+g[0].lat, lng:+g[0].lon} : null;
+    },
+    // 4) Photon (tolera errores de escritura, estilo Google)
+    async ()=>{
+      const g = await (await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(`${limpia} ${comuna||''} Chile`)}&limit=1&lat=-33.45&lon=-70.66`)).json();
+      const f = (g.features||[]).find(x=>x.properties?.countrycode==='CL');
+      return f ? {lat:f.geometry.coordinates[1], lng:f.geometry.coordinates[0]} : null;
+    },
+  ];
+  for(const intento of intentos){
+    try{ const r = await intento(); if(r) return r; }catch(_){}
+    await new Promise(res=>setTimeout(res, 400));
+  }
+  return null;
+}
+
 /* geocodificar direcciones que faltan (1 por segundo, se guardan en la base) */
 async function geocodificarFaltantes(){
   if(geocodificando) return;
@@ -1333,15 +1380,13 @@ async function geocodificarFaltantes(){
   for(const p of faltan){
     $('geoEstado').textContent = `Ubicando direcciones… ${hechas}/${faltan.length}`;
     try{
-      const q = encodeURIComponent(`${p.direccion}, ${p.comuna||''}, Chile`);
-      const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=cl&q=${q}`);
-      const g = await r.json();
-      if(g?.[0]){
-        p.lat = Number(g[0].lat); p.lng = Number(g[0].lon);
+      const r = await buscarCoordenadas(p.direccion, p.comuna);
+      if(r){
+        p.lat = r.lat; p.lng = r.lng;
         delete geoFallos[p.id];
         await sb.from('pedidos').update({lat:p.lat, lng:p.lng}).eq('id', p.id);
       } else {
-        geoFallos[p.id] = 'El mapa no encontró esta dirección — revisa que calle, número y comuna estén bien escritos';
+        geoFallos[p.id] = 'No se encontró con 4 buscadores — revisa calle/número/comuna o usa las sugerencias al escribir';
       }
     }catch(_){
       geoFallos[p.id] = 'Error de conexión al buscar la dirección';

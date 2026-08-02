@@ -46,24 +46,35 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
 
-    // Coordenadas de la dirección (OpenStreetMap Nominatim, máx 3s; si falla, sigue sin coords)
+    // Coordenadas: cadena de 3 estrategias (estructurada -> libre -> Photon)
     let lat: number | null = null, lng: number | null = null;
-    try {
-      const q = encodeURIComponent(
-        `${direccion}, ${comuna ?? ""}, Chile`.replace(/, ,/g, ","),
-      );
+    const dirLimpia = direccion.split(",")[0]
+      .replace(/\b(depto\.?|dpto\.?|departamento|casa|block|bloque|torre|oficina|of\.)\s*\S*/gi, "")
+      .trim();
+    const traer = async (url: string) => {
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), 3000);
-      const geo = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=cl&q=${q}`,
-        { signal: ctrl.signal, headers: { "User-Agent": "zas-reparto/1.0" } },
-      );
-      clearTimeout(t);
-      if (geo.ok) {
-        const g = await geo.json();
-        if (g?.[0]) { lat = Number(g[0].lat); lng = Number(g[0].lon); }
-      }
-    } catch (_) { /* sin coordenadas; el panel puede geocodificar después */ }
+      try {
+        const r = await fetch(url,
+          { signal: ctrl.signal, headers: { "User-Agent": "zas-reparto/1.0" } });
+        clearTimeout(t);
+        return r.ok ? await r.json() : null;
+      } catch (_) { clearTimeout(t); return null; }
+    };
+    // 1) Nominatim estructurada (calle + comuna por separado: más precisa)
+    let g = await traer(`https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=cl&street=${encodeURIComponent(dirLimpia)}&city=${encodeURIComponent(comuna ?? "")}`);
+    if (g?.[0]) { lat = +g[0].lat; lng = +g[0].lon; }
+    // 2) Nominatim libre
+    if (lat == null) {
+      g = await traer(`https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=cl&q=${encodeURIComponent(`${dirLimpia}, ${comuna ?? ""}, Chile`)}`);
+      if (g?.[0]) { lat = +g[0].lat; lng = +g[0].lon; }
+    }
+    // 3) Photon (más tolerante a errores de escritura)
+    if (lat == null) {
+      const ph = await traer(`https://photon.komoot.io/api/?q=${encodeURIComponent(`${dirLimpia} ${comuna ?? ""} Chile`)}&limit=1&lat=-33.45&lon=-70.66`);
+      const f = (ph?.features ?? []).find((x: any) => x?.properties?.countrycode === "CL");
+      if (f) { lat = f.geometry.coordinates[1]; lng = f.geometry.coordinates[0]; }
+    }
 
     // Fecha y hora reales del pedido en la tienda
     let creadoEn: string | null = null;
@@ -76,21 +87,34 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Hora de corte del cliente: lo pagado después del corte se despacha al día siguiente
+    // Hora de corte + días de despacho del cliente:
+    // pagado después del corte => día siguiente; si el día no es hábil para
+    // el cliente (ej: domingo), salta al próximo día de despacho.
     try {
       const { data: cli } = await supa.from("clientes")
-        .select("hora_corte").eq("id", clienteId).maybeSingle();
-      const corte = cli?.hora_corte as string | null; // ej "12:00:00"
-      if (corte && creadoEn && fechaPedido) {
-        const horaLocal = new Date(creadoEn).toLocaleTimeString("en-GB",
-          { timeZone: "America/Santiago", hour12: false }); // "13:45:12"
-        if (horaLocal > corte) {
+        .select("hora_corte, dias_despacho").eq("id", clienteId).maybeSingle();
+      const corte = cli?.hora_corte as string | null;       // "12:00:00"
+      const dias = (cli?.dias_despacho as string | null) ?? "1111111"; // lun..dom
+      if (creadoEn && fechaPedido) {
+        const sumarDia = () => {
           const d2 = new Date(fechaPedido + "T12:00:00Z");
           d2.setUTCDate(d2.getUTCDate() + 1);
           fechaPedido = d2.toISOString().slice(0, 10);
+        };
+        if (corte) {
+          const horaLocal = new Date(creadoEn).toLocaleTimeString("en-GB",
+            { timeZone: "America/Santiago", hour12: false });
+          if (horaLocal > corte) sumarDia();
+        }
+        // avanzar hasta un día en que el cliente despache (máx 7 saltos)
+        for (let i = 0; i < 7; i++) {
+          const dow = new Date(fechaPedido + "T12:00:00Z").getUTCDay(); // 0=dom
+          const idx = (dow + 6) % 7;                                    // 0=lun..6=dom
+          if (dias[idx] !== "0") break;
+          sumarDia();
         }
       }
-    } catch (_) { /* sin corte configurado */ }
+    } catch (_) { /* sin configuración de corte */ }
 
     const { error } = await supa.from("pedidos").upsert({
       ...(creadoEn ? { creado_en: creadoEn } : {}),
