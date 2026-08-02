@@ -168,8 +168,16 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         <input type="search" id="buscar" placeholder="Buscar cliente, dirección, código…">
         <button class="btn" id="nuevoPedido">+ Nuevo pedido</button>
       </div>
+      <div id="barraMasiva" style="display:none;background:var(--ink);color:#fff;border-radius:10px;padding:8px 14px;margin-bottom:10px;align-items:center;gap:10px">
+        <b id="masivaN"></b>
+        <select id="masivaRep" style="width:auto;padding:6px 8px"></select>
+        <button class="btn" id="masivaAsignar">Asignar</button>
+        <button class="btn btn-ghost" style="color:#fff;border-color:#666" id="masivaDesasignar">Quitar asignación</button>
+        <span class="sp" style="flex:1"></span>
+        <button class="btn btn-ghost" style="color:#fff;border-color:#666" onclick="limpiarSeleccion()">✕ Limpiar</button>
+      </div>
       <div class="tbl"><table id="tblPedidos">
-        <thead><tr><th>Código</th><th>Cliente final</th><th>Teléfono</th><th>Dirección</th><th>Comuna</th><th>Empresa</th><th>Repartidor</th><th>Estado</th><th>Fecha pedido</th><th></th></tr></thead>
+        <thead><tr><th><input type="checkbox" id="selTodos" onclick="seleccionarTodos(this.checked)"></th><th>Código</th><th>Cliente final</th><th>Teléfono</th><th>Dirección</th><th>Comuna</th><th>Empresa</th><th>Repartidor</th><th>Estado</th><th>Fecha pedido</th><th></th></tr></thead>
         <tbody id="tbodyPed"></tbody>
       </table></div>
     </section>
@@ -200,9 +208,21 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     </section>
     <!-- Mapa -->
     <section id="t-mapa" style="display:none">
-      <div id="mapa" style="height:calc(100vh - 160px);border-radius:12px;border:1px solid var(--border)"></div>
-      <div id="mapaVacio" style="text-align:center;color:var(--muted);padding:10px;font-size:13px">
-        Aquí verás a tus repartidores en vivo cuando instalen la próxima versión de la app con GPS (etapa 2).
+      <div class="bar">
+        <select id="rutaRep" style="width:auto;min-width:220px" onchange="dibujarRuta()"></select>
+        <button class="btn" id="btnOptimizar" onclick="optimizarRuta()">✨ Optimizar ruta</button>
+        <button class="btn btn-ghost" id="btnGuardarOrden" onclick="guardarOrden()" style="display:none">💾 Guardar este orden</button>
+        <span class="sp"></span>
+        <span id="geoEstado" style="font-size:12px;color:var(--muted)"></span>
+      </div>
+      <div id="mapa" style="height:calc(100vh - 210px);border-radius:12px;border:1px solid var(--border)"></div>
+      <div style="display:flex;gap:14px;padding:8px 4px;font-size:12px;color:var(--ink-2);flex-wrap:wrap">
+        <span>⬤ <b style="color:#52514e">Asignado</b></span>
+        <span>⬤ <b style="color:#2a78d6">Aceptado</b></span>
+        <span>⬤ <b style="color:#eda100">En camino</b></span>
+        <span>⬤ <b style="color:#0ca30c">Entregado</b></span>
+        <span>⬤ <b style="color:#d03b3b">No entregado</b></span>
+        <span style="margin-left:auto">Los números indican el orden de visita; la línea es la ruta.</span>
       </div>
     </section>
 
@@ -461,7 +481,8 @@ async function cargarRepPedidos(){
   pintarRepVista();
 }
 function pintarRepVista(){
-  const activos = repPedidos.filter(p=>!FIN.includes(p.estado));
+  const activos = repPedidos.filter(p=>!FIN.includes(p.estado))
+    .sort((a,b)=>((a.ruta_orden??999)-(b.ruta_orden??999)) || (a.id-b.id));
   const listos = repPedidos.filter(p=>['entregado','no_entregado'].includes(p.estado)).slice(0,15);
   const tarjeta = (p, activo) => {
     const [lbl,ic,col] = EST[p.estado]||[p.estado,'•','var(--muted)'];
@@ -471,6 +492,7 @@ function pintarRepVista(){
     const dirMapa = encodeURIComponent(p.direccion + (p.comuna?', '+p.comuna:''));
     return `<div class="tile" style="margin-bottom:10px;padding:14px">
       <div style="display:flex;align-items:center;gap:6px">
+        ${activo && p.ruta_orden?`<span style="background:var(--brand);color:#fff;border-radius:99px;min-width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;font-weight:700;font-size:13px">${p.ruta_orden}</span>`:''}
         <span class="st" style="color:${col}">${ic} ${lbl}</span>
         <span class="sp" style="flex:1"></span>
         <span class="cod">${esc(p.codigo||'#'+p.id)}</span>
@@ -542,7 +564,10 @@ function suscribir(){
 }
 
 /* ---------- PINTAR ---------- */
-function pintar(){ pintarTiles(); pintarPedidos(); pintarRendimiento(); pintarReps(); pintarClientes(); }
+function pintar(){
+  pintarTiles(); pintarPedidos(); pintarRendimiento(); pintarReps(); pintarClientes();
+  if(mapa && $('t-mapa').style.display!=='none'){ poblarSelectorRuta(); dibujarRuta(); }
+}
 
 function pintarTiles(){
   const hoy = hoyStr();
@@ -586,6 +611,7 @@ function pintarPedidos(){
   });
   $('tbodyPed').innerHTML = lista.length? lista.map(p=>`
     <tr onclick="verDetalle(${p.id})">
+      <td onclick="event.stopPropagation()"><input type="checkbox" ${seleccion.has(p.id)?'checked':''} onchange="alternarSeleccion(${p.id}, this.checked)"></td>
       <td class="cod">${esc(p.codigo||'#'+p.id)}${p.origen==='jumpseller'?' <span style="color:#1baf7a" title="Ingresó automáticamente desde la tienda">⚡</span>':''}</td>
       <td><b>${esc(p.cliente_nombre)}</b></td>
       <td>${p.cliente_telefono? `<a href="tel:${esc(p.cliente_telefono)}" onclick="event.stopPropagation()" style="color:inherit;text-decoration:none">${esc(p.cliente_telefono)}</a>` : '<span class="cod">—</span>'}</td>
@@ -598,7 +624,9 @@ function pintarPedidos(){
       <td><a class="btn btn-ghost" style="padding:4px 10px;text-decoration:none" target="_blank" title="Ver dirección en Google Maps"
         onclick="event.stopPropagation()"
         href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent((p.direccion||'')+(p.comuna?', '+p.comuna:''))}">🗺️</a></td>
-    </tr>`).join('') : '<tr><td colspan="10" class="empty">No hay pedidos con este filtro.</td></tr>';
+    </tr>`).join('') : '<tr><td colspan="11" class="empty">No hay pedidos con este filtro.</td></tr>';
+  ultimaListaFiltrada = lista.map(p=>p.id);
+  pintarBarraMasiva();
 }
 
 function pintarReps(){
@@ -686,6 +714,53 @@ $('cGuardar').onclick = async ()=>{
   await cargarTodo();
 };
 
+/* ---------- SELECCIÓN Y ACCIONES MASIVAS ---------- */
+const seleccion = new Set();
+let ultimaListaFiltrada = [];
+window.alternarSeleccion = (id, v)=>{ v ? seleccion.add(id) : seleccion.delete(id); pintarBarraMasiva(); };
+window.seleccionarTodos = (v)=>{
+  ultimaListaFiltrada.forEach(id=> v ? seleccion.add(id) : seleccion.delete(id));
+  pintarPedidos();
+};
+window.limpiarSeleccion = ()=>{ seleccion.clear(); if($('selTodos')) $('selTodos').checked=false; pintarPedidos(); };
+function pintarBarraMasiva(){
+  const n = seleccion.size;
+  const b = $('barraMasiva');
+  b.style.display = n ? 'flex' : 'none';
+  if(!n) return;
+  $('masivaN').textContent = n + (n===1?' pedido seleccionado':' pedidos seleccionados');
+  $('masivaRep').innerHTML = '<option value="">— elegir repartidor —</option>' +
+    perfiles.filter(p=>p.activo).map(r=>`<option value="${r.id}">${esc(r.nombre)}${r.rol==='admin'?' (admin)':''}</option>`).join('');
+}
+$('masivaAsignar').onclick = async ()=>{
+  const rep = $('masivaRep').value;
+  if(!rep){ toast('Elige un repartidor primero'); return; }
+  const ids = [...seleccion];
+  const { error } = await sb.from('pedidos')
+    .update({repartidor_id: rep, estado: 'asignado'})
+    .in('id', ids)
+    .not('estado','in','("entregado","cancelado")');
+  if(error){ toast('Error: '+error.message); return; }
+  toast(ids.length+' pedidos asignados a '+nombreDe(rep));
+  limpiarSeleccion(); cargarTodo();
+};
+$('masivaDesasignar').onclick = async ()=>{
+  const ids = [...seleccion];
+  let { error } = await sb.from('pedidos')
+    .update({repartidor_id: null, estado: 'pendiente', ruta_orden: null})
+    .in('id', ids)
+    .not('estado','in','("entregado","cancelado","no_entregado")');
+  if(error && /ruta_orden/.test(error.message)){
+    ({ error } = await sb.from('pedidos')
+      .update({repartidor_id: null, estado: 'pendiente'})
+      .in('id', ids)
+      .not('estado','in','("entregado","cancelado","no_entregado")'));
+  }
+  if(error){ toast('Error: '+error.message); return; }
+  toast('Asignación quitada — quedaron pendientes');
+  limpiarSeleccion(); cargarTodo();
+};
+
 /* ---------- ACCIONES ---------- */
 window.toggleRep = async (id, v)=>{
   const { error } = await sb.from('perfiles').update({activo:v}).eq('id', id);
@@ -741,7 +816,9 @@ window.verDetalle = async (id)=>{
     </div>
     <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
       ${!FIN.includes(p.estado)?`<button class="btn btn-ghost" onclick="cambiarEstado(${p.id},'cancelado')">🚫 Cancelar pedido</button>`:''}
+      ${p.repartidor_id && !FIN.includes(p.estado)?`<button class="btn btn-ghost" onclick="desasignar(${p.id})">↩️ Quitar asignación</button>`:''}
       ${p.estado==='no_entregado'?`<button class="btn btn-ghost" onclick="reintentar(${p.id})">🔄 Reintentar</button>`:''}
+      ${p.estado==='cancelado'?`<button class="btn btn-ghost" onclick="reintentar(${p.id})">♻️ Reactivar (pendiente)</button>`:''}
     </div>
     <div class="hist"><b style="font-size:13px">Historial</b>
       ${(hist||[]).map(h=>`<div class="h">${stChip(h.estado)}<span style="margin-left:auto">${fechaHora(h.creado_en)}</span></div>`).join('')}
@@ -761,6 +838,10 @@ window.cambiarEstado = async (id, e)=>{
 window.reintentar = async (id)=>{
   const { error } = await sb.from('pedidos').update({estado:'pendiente', repartidor_id:null}).eq('id',id);
   if(error) toast('Error: '+error.message); else { cerrar('mDet'); toast('Pedido devuelto a pendientes'); }
+};
+window.desasignar = async (id)=>{
+  const { error } = await sb.from('pedidos').update({repartidor_id:null, estado:'pendiente'}).eq('id',id);
+  if(error) toast('Error: '+error.message); else { cerrar('mDet'); toast('Asignación quitada'); }
 };
 
 $('nuevoRep').onclick = ()=>{ ['rNombre','rEmail','rPass'].forEach(i=>$(i).value=''); $('rErr').textContent=''; $('mRep').classList.add('on'); $('rNombre').focus(); };
@@ -790,37 +871,139 @@ document.querySelectorAll('nav button').forEach(b=> b.onclick = ()=>{
   if(b.dataset.t==='reportes') cargarReportes();
 });
 
-/* ---------- MAPA (GPS repartidores) ---------- */
-let mapa = null, marcadores = {};
+/* ---------- MAPA DE RUTAS ---------- */
+let mapa = null, capaPuntos = null, capaLinea = null, ordenPropuesto = null, geocodificando = false;
+const hoyDia = () => hoyStr();
+
 function iniciarMapa(){
-  if(mapa){ setTimeout(()=>mapa.invalidateSize(), 100); return; }
-  if(typeof L === 'undefined'){ $('mapaVacio').textContent = 'No se pudo cargar el mapa (revisa tu internet).'; return; }
-  mapa = L.map('mapa').setView([-33.45, -70.66], 12); // Santiago
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '© OpenStreetMap', maxZoom: 19,
-  }).addTo(mapa);
-  cargarUbicaciones();
-  sb.channel('gps').on('postgres_changes',
-    {event:'*', schema:'public', table:'ubicaciones'},
-    ()=> cargarUbicaciones()
-  ).subscribe();
-}
-async function cargarUbicaciones(){
-  if(!mapa) return;
-  const { data } = await sb.from('ubicaciones').select();
-  const ubic = data||[];
-  $('mapaVacio').style.display = ubic.length ? 'none' : 'block';
-  for(const u of ubic){
-    const nombre = nombreDe(u.repartidor_id) || 'Repartidor';
-    const hace = Math.round((Date.now()-new Date(u.actualizado_en).getTime())/60000);
-    const texto = `<b>${esc(nombre)}</b><br>hace ${hace<1?'menos de 1':hace} min`;
-    if(marcadores[u.repartidor_id]){
-      marcadores[u.repartidor_id].setLatLng([u.lat,u.lng]).setPopupContent(texto);
-    } else {
-      marcadores[u.repartidor_id] = L.marker([u.lat,u.lng]).addTo(mapa).bindPopup(texto);
-    }
+  if(typeof L === 'undefined'){ toast('No se pudo cargar el mapa (revisa tu internet)'); return; }
+  if(!mapa){
+    mapa = L.map('mapa').setView([-33.45, -70.66], 11); // Santiago
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap', maxZoom: 19,
+    }).addTo(mapa);
+    capaPuntos = L.layerGroup().addTo(mapa);
+    capaLinea = L.layerGroup().addTo(mapa);
   }
+  setTimeout(()=>mapa.invalidateSize(), 100);
+  poblarSelectorRuta();
+  dibujarRuta();
+  geocodificarFaltantes();
 }
+
+function poblarSelectorRuta(){
+  const sel = $('rutaRep'); const valor = sel.value;
+  const conteo = id => pedidos.filter(p=>p.repartidor_id===id && !FIN.includes(p.estado)).length;
+  sel.innerHTML = `<option value="">📦 Sin asignar (${pedidos.filter(p=>p.estado==='pendiente').length})</option>` +
+    perfiles.filter(x=>x.activo).map(r=>
+      `<option value="${r.id}">🛵 ${esc(r.nombre)}${r.rol==='admin'?' (admin)':''} — ${conteo(r.id)} activos</option>`).join('');
+  if(valor) sel.value = valor;
+}
+
+function pedidosDeRuta(){
+  const rep = $('rutaRep').value;
+  if(!rep) return pedidos.filter(p=>p.estado==='pendiente');
+  return pedidos.filter(p=>p.repartidor_id===rep &&
+    (!FIN.includes(p.estado) || (p.fecha_pedido===hoyDia() && ['entregado','no_entregado'].includes(p.estado))));
+}
+
+function ordenarParaRuta(lista){
+  if(ordenPropuesto){
+    const pos = Object.fromEntries(ordenPropuesto.map((id,i)=>[id,i]));
+    return [...lista].sort((a,b)=>(pos[a.id]??999)-(pos[b.id]??999));
+  }
+  return [...lista].sort((a,b)=>(a.ruta_orden??999)-(b.ruta_orden??999) || a.id-b.id);
+}
+
+function dibujarRuta(){
+  if(!mapa) return;
+  capaPuntos.clearLayers(); capaLinea.clearLayers();
+  const lista = ordenarParaRuta(pedidosDeRuta());
+  const conCoords = lista.filter(p=>p.lat!=null && p.lng!=null);
+  const sinCoords = lista.length - conCoords.length;
+  $('geoEstado').textContent = sinCoords>0 ? `${sinCoords} dirección(es) aún sin ubicar en el mapa…` : '';
+  if(!conCoords.length) return;
+  let n = 0;
+  const puntosActivos = [];
+  for(const p of conCoords){
+    const activo = !FIN.includes(p.estado);
+    if(activo) n++;
+    const col = {asignado:'#52514e', aceptado:'#2a78d6', en_camino:'#eda100', pendiente:'#898781',
+                 entregado:'#0ca30c', no_entregado:'#d03b3b'}[p.estado] || '#898781';
+    const icono = L.divIcon({ className:'', iconSize:[28,28], iconAnchor:[14,14],
+      html:`<div style="width:28px;height:28px;border-radius:50%;background:${col};color:#fff;display:flex;align-items:center;justify-content:center;font:700 12px system-ui;border:2px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.4)">${activo? n : '✓'}</div>` });
+    L.marker([p.lat,p.lng], {icon:icono}).addTo(capaPuntos).bindPopup(
+      `<b>${activo? 'Parada '+n : EstadoPedido.etiqueta(p.estado)}</b> · ${esc(p.codigo||'')}<br>` +
+      `${esc(p.cliente_nombre)}<br>${esc(p.direccion)}${p.comuna?', '+esc(p.comuna):''}` +
+      (p.cliente_telefono?`<br>📞 ${esc(p.cliente_telefono)}`:''));
+    if(activo) puntosActivos.push([p.lat,p.lng]);
+  }
+  if(puntosActivos.length>1){
+    L.polyline(puntosActivos, {color:'#e85d04', weight:3, opacity:.75, dashArray:'6 8'}).addTo(capaLinea);
+  }
+  const grupo = L.featureGroup([...capaPuntos.getLayers()]);
+  if(grupo.getLayers().length) mapa.fitBounds(grupo.getBounds().pad(0.2));
+}
+
+/* geocodificar direcciones que faltan (1 por segundo, se guardan en la base) */
+async function geocodificarFaltantes(){
+  if(geocodificando) return;
+  const faltan = pedidos.filter(p=>!FIN.includes(p.estado) && (p.lat==null || p.lng==null));
+  if(!faltan.length) return;
+  geocodificando = true;
+  let hechas = 0;
+  for(const p of faltan){
+    $('geoEstado').textContent = `Ubicando direcciones… ${hechas}/${faltan.length}`;
+    try{
+      const q = encodeURIComponent(`${p.direccion}, ${p.comuna||''}, Chile`);
+      const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=cl&q=${q}`);
+      const g = await r.json();
+      if(g?.[0]){
+        p.lat = Number(g[0].lat); p.lng = Number(g[0].lon);
+        await sb.from('pedidos').update({lat:p.lat, lng:p.lng}).eq('id', p.id);
+      }
+    }catch(_){}
+    hechas++;
+    await new Promise(res=>setTimeout(res, 1100)); // respeto del límite de OpenStreetMap
+  }
+  geocodificando = false;
+  $('geoEstado').textContent = '';
+  dibujarRuta();
+}
+
+/* optimización: vecino más cercano desde la bodega (o el centro de los puntos) */
+window.optimizarRuta = ()=>{
+  const activos = pedidosDeRuta().filter(p=>!FIN.includes(p.estado) && p.lat!=null);
+  if(activos.length<2){ toast('Se necesitan al menos 2 pedidos ubicados'); return; }
+  const d = (a,b)=> Math.hypot(a.lat-b.lat, (a.lng-b.lng)*Math.cos(a.lat*Math.PI/180));
+  // punto de partida: bodega del cliente más frecuente si está ubicada; si no, el centroide
+  let inicio = { lat: activos.reduce((s,p)=>s+p.lat,0)/activos.length,
+                 lng: activos.reduce((s,p)=>s+p.lng,0)/activos.length };
+  const pendientes = [...activos]; const orden = [];
+  let actual = inicio;
+  while(pendientes.length){
+    let mejor = 0;
+    for(let i=1;i<pendientes.length;i++) if(d(actual,pendientes[i]) < d(actual,pendientes[mejor])) mejor = i;
+    const sig = pendientes.splice(mejor,1)[0];
+    orden.push(sig.id); actual = sig;
+  }
+  ordenPropuesto = orden;
+  $('btnGuardarOrden').style.display = 'inline-block';
+  dibujarRuta();
+  toast('Ruta optimizada — revisa y guarda si te gusta');
+};
+
+window.guardarOrden = async ()=>{
+  if(!ordenPropuesto) return;
+  for(let i=0;i<ordenPropuesto.length;i++){
+    await sb.from('pedidos').update({ruta_orden:i+1}).eq('id', ordenPropuesto[i]);
+  }
+  toast('Orden de ruta guardado — el repartidor la verá en ese orden');
+  ordenPropuesto = null;
+  $('btnGuardarOrden').style.display = 'none';
+  cargarTodo();
+};
+$('rutaRep').addEventListener('change', ()=>{ ordenPropuesto=null; $('btnGuardarOrden').style.display='none'; });
 
 /* ---------- REPORTES ---------- */
 let repDias = 7;

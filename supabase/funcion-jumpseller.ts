@@ -46,6 +46,25 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
 
+    // Coordenadas de la dirección (OpenStreetMap Nominatim, máx 3s; si falla, sigue sin coords)
+    let lat: number | null = null, lng: number | null = null;
+    try {
+      const q = encodeURIComponent(
+        `${direccion}, ${comuna ?? ""}, Chile`.replace(/, ,/g, ","),
+      );
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 3000);
+      const geo = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=cl&q=${q}`,
+        { signal: ctrl.signal, headers: { "User-Agent": "zas-reparto/1.0" } },
+      );
+      clearTimeout(t);
+      if (geo.ok) {
+        const g = await geo.json();
+        if (g?.[0]) { lat = Number(g[0].lat); lng = Number(g[0].lon); }
+      }
+    } catch (_) { /* sin coordenadas; el panel puede geocodificar después */ }
+
     // Fecha y hora reales del pedido en la tienda
     let creadoEn: string | null = null;
     let fechaPedido: string | null = null;
@@ -60,6 +79,7 @@ Deno.serve(async (req) => {
     const { error } = await supa.from("pedidos").upsert({
       ...(creadoEn ? { creado_en: creadoEn } : {}),
       ...(fechaPedido ? { fecha_pedido: fechaPedido } : {}),
+      ...(lat != null && lng != null ? { lat, lng } : {}),
       cliente_id: clienteId,
       externo_id: String(o.id),
       cliente_nombre: comprador,
