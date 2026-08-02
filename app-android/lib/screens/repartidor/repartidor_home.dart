@@ -121,7 +121,13 @@ class _RepartidorHomeState extends State<RepartidorHome> {
           final activos = snap.data!
               .where((p) => !['entregado', 'cancelado', 'no_entregado']
                   .contains(p['estado']))
-              .toList();
+              .toList()
+            ..sort((a, b) {
+              final oa = (a['ruta_orden'] as int?) ?? 999;
+              final ob = (b['ruta_orden'] as int?) ?? 999;
+              if (oa != ob) return oa.compareTo(ob);
+              return (a['id'] as int).compareTo(b['id'] as int);
+            });
           final terminadosHoy = snap.data!
               .where((p) =>
                   ['entregado', 'no_entregado'].contains(p['estado']))
@@ -179,6 +185,22 @@ class _RepartidorHomeState extends State<RepartidorHome> {
           children: [
             Row(
               children: [
+                if (activo && p['ruta_orden'] != null) ...[
+                  Container(
+                    width: 24,
+                    height: 24,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                        color: const Color(0xFFE85D04),
+                        borderRadius: BorderRadius.circular(99)),
+                    child: Text('${p['ruta_orden']}',
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13)),
+                  ),
+                  const SizedBox(width: 6),
+                ],
                 Icon(EstadoPedido.icono(estado),
                     color: EstadoPedido.color(estado), size: 20),
                 const SizedBox(width: 6),
@@ -217,11 +239,6 @@ class _RepartidorHomeState extends State<RepartidorHome> {
             if (p['referencia'] != null)
               Text('Ref: ${p['referencia']}',
                   style: TextStyle(color: Colors.grey.shade700)),
-            if (p['detalle'] != null) Text('Pedido: ${p['detalle']}'),
-            if (p['monto'] != null)
-              Text(
-                  'Cobrar: ${formatoMonto(p['monto'])} (${p['metodo_pago'] ?? ''})',
-                  style: const TextStyle(fontWeight: FontWeight.w600)),
             if (activo) ...[
               const SizedBox(height: 10),
               Row(
