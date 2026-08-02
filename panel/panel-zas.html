@@ -385,6 +385,14 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     <div id="cJsEstado" style="font-size:12px;margin-top:8px;min-height:16px"></div>
     <button class="btn" style="margin-top:6px" id="cConectar">Conectar tienda</button>
   </div>
+  <div id="cMeli" style="display:none;margin-top:12px;padding:14px;background:#fff9e6;border:1px solid #f0e3b0;border-radius:10px">
+    <b style="font-size:13px">🤝 Conectar MercadoLibre Flex</b>
+    <p style="color:var(--ink-2);font-size:12px;margin:6px 0 8px">
+      Se abrirá MercadoLibre para que el <b>dueño de la cuenta vendedora</b> inicie sesión y autorice a ZAS.
+      Desde ahí, cada venta Flex pagada entra sola como pedido de esta empresa.
+    </p>
+    <button class="btn" style="background:#3483fa" onclick="conectarMeli()">Conectar MercadoLibre</button>
+  </div>
   <div class="err" id="cErr"></div>
   <div class="foot">
     <button class="btn btn-ghost" onclick="cerrar('mCliente')">Cancelar</button>
@@ -693,7 +701,7 @@ function pintarPedidos(){
   $('tbodyPed').innerHTML = lista.length? lista.map(p=>`
     <tr onclick="verDetalle(${p.id})">
       <td onclick="event.stopPropagation()"><input type="checkbox" ${seleccion.has(p.id)?'checked':''} onchange="alternarSeleccion(${p.id}, this.checked)"></td>
-      <td class="cod">${esc(p.codigo||'#'+p.id)}${p.origen==='jumpseller'?' <span style="color:#1baf7a" title="Ingresó automáticamente desde la tienda">⚡</span>':''}</td>
+      <td class="cod">${esc(p.codigo||'#'+p.id)}${p.origen==='jumpseller'?' <span style="color:#1baf7a" title="Automático desde Jumpseller">⚡</span>':''}${p.origen==='mercadolibre'?' <span style="color:#3483fa;font-weight:800" title="Automático desde MercadoLibre Flex">Ⓜ</span>':''}</td>
       <td class="cod">${p.externo_id?'#'+esc(p.externo_id):'—'}</td>
       <td><b>${esc(p.cliente_nombre)}</b></td>
       <td>${p.cliente_telefono? `<a href="tel:${esc(p.cliente_telefono)}" onclick="event.stopPropagation()" style="color:inherit;text-decoration:none">${esc(p.cliente_telefono)}</a>` : '<span class="cod">—</span>'}</td>
@@ -806,7 +814,14 @@ function actualizarWebhookBox(){
   const esJump = $('cInteg').value==='jumpseller';
   $('cWebhook').style.display = (esJump && clienteEditando) ? 'block' : 'none';
   if(esJump && clienteEditando){ $('cJsLogin').value=''; $('cJsToken').value=''; $('cJsEstado').textContent=''; }
+  $('cMeli').style.display = clienteEditando ? 'block' : 'none';
 }
+window.conectarMeli = ()=>{
+  if(!clienteEditando){ toast('Guarda primero el cliente y vuelve a editarlo'); return; }
+  const redirect = encodeURIComponent(SUPABASE_URL + '/functions/v1/ml-oauth');
+  window.open(`https://auth.mercadolibre.cl/authorization?response_type=code&client_id=7050388200486625&redirect_uri=${redirect}&state=cliente-${clienteEditando}`,
+    '_blank');
+};
 $('cInteg').onchange = actualizarWebhookBox;
 $('cConectar').onclick = async ()=>{
   const login = $('cJsLogin').value.trim(), authtoken = $('cJsToken').value.trim();
