@@ -125,6 +125,7 @@ Deno.serve(async (req) => {
       ...(lat != null && lng != null ? { lat, lng } : {}),
       cliente_id: cta.cliente_id,
       externo_id: "ML-" + orderId,
+      envio_id: String(s.id),   // n° de envío: es lo que trae el QR de la etiqueta Flex
       cliente_nombre: nombre,
       cliente_telefono: telefono,
       direccion,
