@@ -178,7 +178,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         <button class="btn btn-ghost" style="color:#fff;border-color:#666" onclick="limpiarSeleccion()">✕ Limpiar</button>
       </div>
       <div class="tbl"><table id="tblPedidos">
-        <thead><tr><th><input type="checkbox" id="selTodos" onclick="seleccionarTodos(this.checked)"></th><th>Código</th><th>Cliente final</th><th>Teléfono</th><th>Dirección</th><th>Comuna</th><th>Empresa</th><th>Repartidor</th><th>Estado</th><th>Fecha pedido</th><th></th></tr></thead>
+        <thead><tr><th><input type="checkbox" id="selTodos" onclick="seleccionarTodos(this.checked)"></th><th>Código</th><th>Cód. envío</th><th>Cliente final</th><th>Teléfono</th><th>Dirección</th><th>Comuna</th><th>Empresa</th><th>Repartidor</th><th>Estado</th><th>Fecha pedido</th><th></th></tr></thead>
         <tbody id="tbodyPed"></tbody>
       </table></div>
     </section>
@@ -641,13 +641,14 @@ function pintarPedidos(){
       : filtro==='sin_asignar' ? p.estado==='pendiente'
       : filtro==='hoy' ? p.fecha_pedido===hoy
       : filtro==='manana' ? p.fecha_pedido===manana : true;
-    const m = !q || [p.codigo,p.cliente_nombre,p.direccion,p.comuna,clienteDe(p.cliente_id)||''].join(' ').toLowerCase().includes(q);
+    const m = !q || [p.codigo,p.externo_id||'',p.cliente_nombre,p.direccion,p.comuna,clienteDe(p.cliente_id)||''].join(' ').toLowerCase().includes(q);
     return f && m;
   });
   $('tbodyPed').innerHTML = lista.length? lista.map(p=>`
     <tr onclick="verDetalle(${p.id})">
       <td onclick="event.stopPropagation()"><input type="checkbox" ${seleccion.has(p.id)?'checked':''} onchange="alternarSeleccion(${p.id}, this.checked)"></td>
       <td class="cod">${esc(p.codigo||'#'+p.id)}${p.origen==='jumpseller'?' <span style="color:#1baf7a" title="Ingresó automáticamente desde la tienda">⚡</span>':''}</td>
+      <td class="cod">${p.externo_id?'#'+esc(p.externo_id):'—'}</td>
       <td><b>${esc(p.cliente_nombre)}</b></td>
       <td>${p.cliente_telefono? `<a href="tel:${esc(p.cliente_telefono)}" onclick="event.stopPropagation()" style="color:inherit;text-decoration:none">${esc(p.cliente_telefono)}</a>` : '<span class="cod">—</span>'}</td>
       <td>${esc(p.direccion)}</td>
@@ -659,7 +660,7 @@ function pintarPedidos(){
       <td><a class="btn btn-ghost" style="padding:4px 10px;text-decoration:none" target="_blank" title="Ver dirección en Google Maps"
         onclick="event.stopPropagation()"
         href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent((p.direccion||'')+(p.comuna?', '+p.comuna:''))}">🗺️</a></td>
-    </tr>`).join('') : '<tr><td colspan="11" class="empty">No hay pedidos con este filtro.</td></tr>';
+    </tr>`).join('') : '<tr><td colspan="12" class="empty">No hay pedidos con este filtro.</td></tr>';
   ultimaListaFiltrada = lista.map(p=>p.id);
   pintarBarraMasiva();
 }
@@ -892,7 +893,7 @@ window.verDetalle = async (id)=>{
     ['Empresa', p.cliente_id? (clienteDe(p.cliente_id)||'')+(p.origen==='jumpseller'?' (⚡ pedido automático Jumpseller'+(p.externo_id?' #'+p.externo_id:'')+')':'') : null],
     ['Cliente',p.cliente_nombre],['Teléfono',p.cliente_telefono],
     ['Dirección',p.direccion],['Comuna',p.comuna],['Referencia',p.referencia],
-    ['Detalle',p.detalle],['Monto',p.monto!=null?clp(p.monto)+' ('+(p.metodo_pago||'')+')':null],
+    ['Cód. envío',p.externo_id?'#'+p.externo_id:null],
     ['Repartidor',p.repartidor_id?nombreDe(p.repartidor_id):'Sin asignar'],['Nota entrega',p.nota_entrega],
   ].filter(([,v])=>v).map(([k,v])=>`<div class="row"><b>${k}</b><span>${esc(v)}</span></div>`).join('');
   $('mDetBody').innerHTML = `
@@ -1135,17 +1136,17 @@ function dibujarRuta(){
   const sinCoords = lista.length - conCoords.length;
   $('geoEstado').textContent = sinCoords>0 ? `${sinCoords} dirección(es) aún sin ubicar en el mapa…` : '';
   if(!conCoords.length) return;
-  let n = 0;
   const puntosActivos = [];
   for(const p of conCoords){
     const activo = !FIN.includes(p.estado);
-    if(activo) n++;
+    // el número de parada es su posición en la ruta del día (incluye las ya completadas)
+    const n = lista.indexOf(p) + 1;
     const col = {asignado:'#52514e', aceptado:'#2a78d6', en_camino:'#eda100', pendiente:'#898781',
                  entregado:'#0ca30c', no_entregado:'#d03b3b'}[p.estado] || '#898781';
     const icono = L.divIcon({ className:'', iconSize:[28,28], iconAnchor:[14,14],
-      html:`<div style="width:28px;height:28px;border-radius:50%;background:${col};color:#fff;display:flex;align-items:center;justify-content:center;font:700 12px system-ui;border:2px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.4)">${activo? n : '✓'}</div>` });
+      html:`<div style="width:28px;height:28px;border-radius:50%;background:${col};color:#fff;display:flex;align-items:center;justify-content:center;font:700 12px system-ui;border:2px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.4);${activo?'':'opacity:.85'}">${n}</div>` });
     L.marker([p.lat,p.lng], {icon:icono}).addTo(capaPuntos).bindPopup(
-      `<b>${activo? 'Parada '+n : EstadoPedido.etiqueta(p.estado)}</b> · ${esc(p.codigo||'')}<br>` +
+      `<b>Parada ${n} · ${EstadoPedido.etiqueta(p.estado)}</b> · ${esc(p.codigo||'')}<br>` +
       `${esc(p.cliente_nombre)}<br>${esc(p.direccion)}${p.comuna?', '+esc(p.comuna):''}` +
       (p.cliente_telefono?`<br>📞 ${esc(p.cliente_telefono)}`:''));
     if(activo) puntosActivos.push([p.lat,p.lng]);
