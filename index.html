@@ -60,7 +60,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
   nav button{background:none; border:none; padding:16px 14px; color:var(--ink-2); border-bottom:2px solid transparent; font-weight:500}
   nav button.on{color:var(--brand); border-bottom-color:var(--brand); font-weight:600}
   #who{margin-left:auto; color:var(--muted); font-size:13px}
-  main{max-width:1200px; margin:0 auto; padding:20px}
+  main{max-width:1750px; margin:0 auto; padding:20px}
+  #tblPedidos td{white-space:nowrap}
 
   /* ---------- stat tiles ---------- */
   .tiles{display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:12px; margin-bottom:20px}
@@ -141,6 +142,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     </nav>
     <span class="live"><span class="dot"></span>en vivo</span>
     <span id="who"></span>
+    <button class="btn-ghost btn" id="btnMisRepartos">🛵 Mis repartos</button>
     <button class="btn-ghost btn" id="salir">Salir</button>
   </header>
 
@@ -166,8 +168,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         <input type="search" id="buscar" placeholder="Buscar cliente, dirección, código…">
         <button class="btn" id="nuevoPedido">+ Nuevo pedido</button>
       </div>
-      <div class="tbl"><table>
-        <thead><tr><th>Código</th><th>Cliente final</th><th>Dirección</th><th>Comuna</th><th>Empresa</th><th>Monto</th><th>Repartidor</th><th>Estado</th><th>Hora</th></tr></thead>
+      <div class="tbl"><table id="tblPedidos">
+        <thead><tr><th>Código</th><th>Cliente final</th><th>Dirección</th><th>Comuna</th><th>Empresa</th><th>Repartidor</th><th>Estado</th><th>Hora</th></tr></thead>
         <tbody id="tbodyPed"></tbody>
       </table></div>
     </section>
@@ -242,6 +244,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     <div class="logo" style="width:34px;height:34px;font-size:17px;border-radius:9px">🛵</div>
     <h1 id="repHola" style="font-size:15px">Mis pedidos</h1>
     <span class="live" style="margin-left:auto"><span class="dot"></span>en vivo</span>
+    <button class="btn-ghost btn" id="repVolver" style="display:none" onclick="volverPanel()">◀ Panel</button>
     <button class="btn-ghost btn" onclick="sb.auth.signOut()">Salir</button>
   </header>
   <main style="max-width:640px;padding:12px" id="repLista"></main>
@@ -406,6 +409,7 @@ async function manejarSesion(session){
   sesionMontada = session.user.id;
   $('login').style.display='none';
   if(perfil.rol==='admin'){
+    adminUid = session.user.id;
     $('who').textContent = perfil.nombre;
     $('app').style.display='block';
     await cargarTodo(); suscribir();
@@ -418,6 +422,22 @@ async function manejarSesion(session){
 sb.auth.onAuthStateChange((_ev, session)=>{ manejarSesion(session); });
 // restauración explícita al cargar la página
 sb.auth.getSession().then(({ data })=> manejarSesion(data?.session ?? null));
+
+/* ---------- ADMIN COMO REPARTIDOR ---------- */
+let adminUid = null;
+$('btnMisRepartos').onclick = async ()=>{
+  if(!adminUid) return;
+  $('app').style.display='none';
+  $('repApp').style.display='block';
+  $('repVolver').style.display='inline-block';
+  $('repHola').textContent = 'Mis repartos';
+  await iniciarRepartidor(adminUid);
+  cargarRepPedidos();
+};
+window.volverPanel = ()=>{
+  $('repApp').style.display='none';
+  $('app').style.display='block';
+};
 
 /* ---------- VISTA REPARTIDOR ---------- */
 let repUid = null, repPedidos = [], repClientes = {}, repSuscrito = false;
@@ -566,16 +586,15 @@ function pintarPedidos(){
   });
   $('tbodyPed').innerHTML = lista.length? lista.map(p=>`
     <tr onclick="verDetalle(${p.id})">
-      <td class="cod">${esc(p.codigo||'#'+p.id)}${p.origen==='jumpseller'?'<br><span style="color:#1baf7a">⚡ auto</span>':''}</td>
-      <td><b>${esc(p.cliente_nombre)}</b>${p.detalle?`<br><span class="cod">${esc(p.detalle)}</span>`:''}</td>
+      <td class="cod">${esc(p.codigo||'#'+p.id)}${p.origen==='jumpseller'?' <span style="color:#1baf7a" title="Ingresó automáticamente desde la tienda">⚡</span>':''}</td>
+      <td><b>${esc(p.cliente_nombre)}</b></td>
       <td>${esc(p.direccion)}</td>
       <td>${p.comuna? esc(p.comuna) : '<span class="cod">—</span>'}</td>
       <td>${p.cliente_id? esc(clienteDe(p.cliente_id)||'…') : '<span class="cod">—</span>'}</td>
-      <td>${clp(p.monto)}</td>
       <td>${p.repartidor_id? esc(nombreDe(p.repartidor_id)) : '<span class="cod">—</span>'}</td>
       <td>${stChip(p.estado)}</td>
       <td class="cod">${hora(p.creado_en)}</td>
-    </tr>`).join('') : '<tr><td colspan="9" class="empty">No hay pedidos con este filtro.</td></tr>';
+    </tr>`).join('') : '<tr><td colspan="8" class="empty">No hay pedidos con este filtro.</td></tr>';
 }
 
 function pintarReps(){
