@@ -384,14 +384,26 @@ async function login(){
 }
 $('salir').onclick = ()=> sb.auth.signOut();
 
-sb.auth.onAuthStateChange(async (_ev, session)=>{
+let sesionMontada = null;   // uid ya montado en pantalla
+let intentosPerfil = 0;
+async function manejarSesion(session){
   if(!session){
+    sesionMontada = null;
     $('app').style.display='none'; $('repApp').style.display='none';
-    $('login').style.display='flex'; return;
+    $('login').style.display='flex';
+    return;
   }
-  const { data:perfil } = await sb.from('perfiles').select().eq('id', session.user.id).maybeSingle();
+  if(sesionMontada === session.user.id) return; // ya está montado, no repetir
+  const { data:perfil, error } = await sb.from('perfiles').select().eq('id', session.user.id).maybeSingle();
+  if(error){
+    // fallo transitorio (red / token refrescándose): reintentar, NUNCA cerrar sesión
+    if(intentosPerfil++ < 5) setTimeout(()=>manejarSesion(session), 1200);
+    return;
+  }
+  intentosPerfil = 0;
   if(!perfil){ $('lErr').textContent='No se encontró tu perfil.'; await sb.auth.signOut(); return; }
   if(perfil.activo===false){ $('lErr').textContent='Tu cuenta está desactivada.'; await sb.auth.signOut(); return; }
+  sesionMontada = session.user.id;
   $('login').style.display='none';
   if(perfil.rol==='admin'){
     $('who').textContent = perfil.nombre;
@@ -402,7 +414,10 @@ sb.auth.onAuthStateChange(async (_ev, session)=>{
     $('repApp').style.display='block';
     await iniciarRepartidor(session.user.id);
   }
-});
+}
+sb.auth.onAuthStateChange((_ev, session)=>{ manejarSesion(session); });
+// restauración explícita al cargar la página
+sb.auth.getSession().then(({ data })=> manejarSesion(data?.session ?? null));
 
 /* ---------- VISTA REPARTIDOR ---------- */
 let repUid = null, repPedidos = [], repClientes = {}, repSuscrito = false;
@@ -493,7 +508,10 @@ async function cargarTodo(){
   perfiles = p1.data||[]; pedidos = p2.data||[]; clientes = p3.data||[];
   pintar();
 }
+let yaSuscrito = false;
 function suscribir(){
+  if(yaSuscrito) return;
+  yaSuscrito = true;
   sb.channel('cambios')
     .on('postgres_changes',{event:'*',schema:'public',table:'pedidos'}, payload=>{
       if(payload.eventType==='INSERT') pedidos.unshift(payload.new);
