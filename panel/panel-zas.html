@@ -993,6 +993,14 @@ window.verDetalle = async (id)=>{
       <h2>${esc(p.codigo||'#'+p.id)}</h2>${stChip(p.estado)}
     </div>
     <div style="margin:12px 0">${filas}</div>
+    ${p.token_seguimiento ? `
+    <div style="margin:4px 0 10px;padding:10px 12px;background:#eef6ff;border:1px solid #cfe3f7;border-radius:10px;display:flex;align-items:center;gap:8px">
+      <span style="font-size:13px"><b>🔗 Link de seguimiento</b> para el cliente final</span>
+      <span class="sp" style="flex:1"></span>
+      <button class="btn btn-ghost" style="padding:4px 12px;font-size:12px" onclick="copiarSeguimiento(${p.id})">Copiar link</button>
+      <a class="btn btn-ghost" style="padding:4px 12px;font-size:12px;text-decoration:none" target="_blank"
+         href="seguimiento.html?p=${encodeURIComponent(p.codigo||'')}&t=${esc(p.token_seguimiento)}">Ver</a>
+    </div>` : ''}
     <div style="margin:4px 0 12px;padding:12px;background:#f7f6f2;border-radius:10px">
       <b style="font-size:13px">✏️ Corregir dirección</b>
       <span class="cod" style="margin-left:6px">${p.lat!=null?'ubicada en el mapa ✓':'⚠️ sin ubicar'}</span>
@@ -1042,6 +1050,13 @@ window.verDetalle = async (id)=>{
     <div class="foot"><button class="btn btn-ghost" onclick="cerrar('mDet')">Cerrar</button></div>`;
   $('mDet').classList.add('on');
 };
+window.copiarSeguimiento = (id)=>{
+  const p = pedidos.find(x=>x.id===id); if(!p?.token_seguimiento) return;
+  const link = `https://edesgarceaux-dev.github.io/zas-reparto/seguimiento.html?p=${encodeURIComponent(p.codigo||'')}&t=${p.token_seguimiento}`;
+  navigator.clipboard.writeText(link);
+  toast('🔗 Link de seguimiento copiado — pégalo en WhatsApp o correo');
+};
+
 window.corregirDireccionPedido = async (id)=>{
   const dir = $('dDir').value.trim(), com = $('dCom').value.trim();
   if(!dir){ $('dDirEstado').innerHTML='<span style="color:#d03b3b">Escribe la dirección</span>'; return; }

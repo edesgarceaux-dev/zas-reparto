@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Seguimiento de tu pedido</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  *{margin:0;box-sizing:border-box}
+  body{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;background:#F7F5F2;color:#161616;min-height:100vh}
+  .top{background:linear-gradient(135deg,#F48C06,#DC2F02);color:#fff;padding:26px 20px 30px;border-radius:0 0 26px 26px;text-align:center}
+  .top .logo{font-size:34px}
+  .top h1{font-size:19px;font-weight:800;margin-top:4px}
+  .top p{opacity:.9;font-size:13px;margin-top:2px}
+  main{max-width:560px;margin:-14px auto 30px;padding:0 16px}
+  .card{background:#fff;border-radius:18px;padding:20px;border:1px solid rgba(0,0,0,.05);margin-bottom:14px}
+  .estado-big{text-align:center;padding:6px 0 2px}
+  .estado-big .ico{font-size:44px}
+  .estado-big h2{font-size:20px;font-weight:800;margin-top:6px}
+  .estado-big p{color:#8a877e;font-size:13px;margin-top:3px}
+  .vivo{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:#0CA30C;font-weight:700;margin-top:8px}
+  .vivo .dot{width:8px;height:8px;border-radius:50%;background:#0CA30C;animation:p 2s infinite}
+  @keyframes p{50%{opacity:.25}}
+  .paso{display:flex;gap:14px}
+  .paso .col{display:flex;flex-direction:column;align-items:center}
+  .paso .pin{width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0;border:2px solid}
+  .paso .linea{width:2px;flex:1;min-height:22px;background:#e8e6df}
+  .paso .tx{padding-bottom:18px}
+  .paso .tit{font-weight:700;font-size:14.5px}
+  .paso .sub{font-size:12px;color:#8a877e;margin-top:1px}
+  .hecho .pin{background:#0CA30C;border-color:#0CA30C;color:#fff}
+  .hecho .linea{background:#0CA30C}
+  .actual .pin{background:#fff;border-color:#E85D04;color:#E85D04;box-shadow:0 0 0 4px #FFE8D9}
+  .actual .tit{color:#E85D04}
+  .futuro .pin{background:#fff;border-color:#e0ded6;color:#c9c6bc}
+  .futuro .tit{color:#b5b2a8}
+  .malo .pin{background:#D03B3B;border-color:#D03B3B;color:#fff}
+  .malo .tit{color:#D03B3B}
+  #mapa{height:230px;border-radius:14px;display:none}
+  .pie{text-align:center;color:#b5b2a8;font-size:11.5px;padding:10px}
+  .err{text-align:center;padding:40px 20px}
+  .err .ico{font-size:46px}
+  .err h2{margin:10px 0 6px}
+  .err p{color:#8a877e;font-size:14px}
+</style>
+</head>
+<body>
+  <div class="top">
+    <div class="logo">🛵</div>
+    <h1 id="tEmpresa">Seguimiento de tu pedido</h1>
+    <p id="tCodigo"></p>
+  </div>
+  <main id="cont">
+    <div class="card" style="text-align:center;padding:40px">Cargando seguimiento…</div>
+  </main>
+  <div class="pie">Reparto operado por <b>ZAS Reparto</b></div>
+
+<script>
+const SUPA = 'https://racwaageoajxaxzqtjio.supabase.co';
+const KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJhY3dhYWdlb2FqeGF4enF0amlvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU1MzU3NjUsImV4cCI6MjEwMTExMTc2NX0.9SijMMVHYM2c6oYUc6mA62XpWw4Y2zf8d9HhalPSJWA';
+const q = new URLSearchParams(location.search);
+const cod = q.get('p'), tok = q.get('t');
+let mapa=null, mDest=null, mRep=null;
+
+const fmt = ts => ts ? new Date(ts).toLocaleString('es-CL',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}) : null;
+
+async function cargar(){
+  if(!cod || !tok){ return errorUI('Link incompleto','Pide nuevamente tu link de seguimiento.'); }
+  let d = null;
+  try{
+    const r = await fetch(`${SUPA}/rest/v1/rpc/seguimiento_publico`, {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json', apikey:KEY, Authorization:'Bearer '+KEY },
+      body: JSON.stringify({ cod, tok }),
+    });
+    d = await r.json();
+  }catch(_){ return errorUI('Sin conexión','Revisa tu internet e intenta de nuevo.'); }
+  if(!d || d.error || !d.codigo){ return errorUI('Pedido no encontrado','El link no es válido o el pedido ya no está disponible.'); }
+  pintar(d);
+}
+
+function errorUI(t, s){
+  document.getElementById('cont').innerHTML =
+    `<div class="card err"><div class="ico">🔍</div><h2>${t}</h2><p>${s}</p></div>`;
+}
+
+function pintar(d){
+  document.getElementById('tEmpresa').textContent = d.empresa ? `Pedido de ${d.empresa}` : 'Seguimiento de tu pedido';
+  document.getElementById('tCodigo').textContent = `${d.codigo}${d.cliente ? ' · para '+d.cliente : ''}`;
+
+  const h = {};
+  (d.historial||[]).forEach(x=>{ if(!h[x.estado]) h[x.estado]=x.en; });
+  const enCamino = d.estado==='en_camino';
+  const entregado = d.estado==='entregado';
+  const fallido = d.estado==='no_entregado';
+  const cancelado = d.estado==='cancelado';
+
+  const cab = entregado
+    ? ['✅','¡Pedido entregado!', d.nota || 'Gracias por tu compra.']
+    : fallido
+    ? ['😕','No pudimos entregar', (d.nota?d.nota+' · ':'')+'Nos contactaremos para reintentar.']
+    : cancelado
+    ? ['🚫','Pedido cancelado','Si crees que es un error, contacta a la tienda.']
+    : enCamino
+    ? ['🛵','¡Va en camino!', `${d.repartidor||'Tu repartidor'} está en ruta hacia tu dirección.`]
+    : ['📦','Preparando tu entrega', `Programado para el ${d.fecha_despacho ? new Date(d.fecha_despacho+'T12:00:00').toLocaleDateString('es-CL',{weekday:'long',day:'numeric',month:'long'}) : 'próximo despacho'}.`];
+
+  const pasos = [
+    ['Pedido recibido', fmt(d.creado_en), true],
+    ['Asignado a repartidor', fmt(d.asignado_en || h['asignado']), !!(d.asignado_en || h['asignado'])],
+    [enCamino ? `En camino con ${d.repartidor||'tu repartidor'}` : 'En camino', fmt(h['en_camino']), !!h['en_camino']],
+    fallido
+      ? ['No entregado', fmt(h['no_entregado']), true, 'malo']
+      : ['Entregado', fmt(d.entregado_en || h['entregado']), entregado],
+  ];
+  let idxActual = pasos.findIndex(p=>!p[2]);
+  if(idxActual===-1) idxActual = 99;
+
+  document.getElementById('cont').innerHTML = `
+    <div class="card estado-big">
+      <div class="ico">${cab[0]}</div>
+      <h2>${cab[1]}</h2>
+      <p>${cab[2]}</p>
+      ${!entregado && !fallido && !cancelado ? '<div class="vivo"><span class="dot"></span>Actualización en vivo</div>' : ''}
+    </div>
+    <div class="card">
+      ${pasos.map((p,i)=>{
+        const clase = p[3]==='malo' ? 'malo' : p[2] ? 'hecho' : (i===idxActual ? 'actual' : 'futuro');
+        return `<div class="paso ${clase}">
+          <div class="col"><div class="pin">${p[3]==='malo'?'✕':p[2]?'✓':i+1}</div>${i<pasos.length-1?'<div class="linea"></div>':''}</div>
+          <div class="tx"><div class="tit">${p[0]}</div><div class="sub">${p[1] || (clase==='actual' ? 'En proceso…' : 'Pendiente')}</div></div>
+        </div>`;
+      }).join('')}
+      <div style="font-size:12px;color:#8a877e;margin-top:2px">📍 ${d.direccion||''}${d.comuna?', '+d.comuna:''}</div>
+    </div>
+    <div class="card" id="cardMapa" style="display:none;padding:10px"><div id="mapa"></div></div>`;
+
+  // mapa: destino siempre que exista; repartidor solo en camino
+  if(typeof L!=='undefined' && d.dest_lat!=null){
+    document.getElementById('cardMapa').style.display='block';
+    document.getElementById('mapa').style.display='block';
+    if(!mapa){
+      mapa = L.map('mapa', {zoomControl:false, attributionControl:false}).setView([d.dest_lat, d.dest_lng], 14);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(mapa);
+    }
+    const iconoCasa = L.divIcon({className:'',iconSize:[30,30],iconAnchor:[15,15],
+      html:'<div style="width:30px;height:30px;border-radius:50%;background:#E85D04;color:#fff;display:flex;align-items:center;justify-content:center;font-size:15px;border:2px solid #fff;box-shadow:0 1px 6px rgba(0,0,0,.35)">🏠</div>'});
+    if(!mDest) mDest = L.marker([d.dest_lat, d.dest_lng], {icon:iconoCasa}).addTo(mapa);
+    if(d.rep_lat!=null){
+      const iconoMoto = L.divIcon({className:'',iconSize:[30,30],iconAnchor:[15,15],
+        html:'<div style="width:30px;height:30px;border-radius:50%;background:#0CA30C;color:#fff;display:flex;align-items:center;justify-content:center;font-size:15px;border:2px solid #fff;box-shadow:0 1px 6px rgba(0,0,0,.35)">🛵</div>'});
+      if(mRep) mRep.setLatLng([d.rep_lat, d.rep_lng]);
+      else mRep = L.marker([d.rep_lat, d.rep_lng], {icon:iconoMoto}).addTo(mapa);
+      mapa.fitBounds(L.latLngBounds([[d.dest_lat,d.dest_lng],[d.rep_lat,d.rep_lng]]).pad(0.3));
+    } else if(mRep){ mapa.removeLayer(mRep); mRep=null; }
+    setTimeout(()=>mapa.invalidateSize(),150);
+  }
+}
+
+cargar();
+setInterval(cargar, 15000); // en vivo cada 15 s
+</script>
+</body>
+</html>
