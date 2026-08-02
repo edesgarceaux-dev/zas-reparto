@@ -370,19 +370,21 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
 </div></div>
 
 <!-- modal etiquetas Jumpseller con QR (portal empresa) -->
-<div class="veil" id="mEmpQr"><div class="modal">
+<div class="veil" id="mEmpQr"><div class="modal" style="width:min(800px,96vw)">
   <h2>🏷️ Etiquetas Jumpseller con QR</h2>
-  <p style="color:var(--muted);font-size:12px;margin:2px 0 14px">Sube el PDF de <b>"Imprimir pedido"</b> de Jumpseller y te lo devolvemos con un código QR pegado, listo para imprimir y pegar en el bulto. El repartidor lo escanea igual que las etiquetas de MercadoLibre Flex.</p>
-  <label>Archivo PDF del pedido</label>
+  <p style="color:var(--muted);font-size:12px;margin:2px 0 14px">Sube el PDF de <b>"Imprimir pedido"</b> de Jumpseller — puede traer un pedido o muchos, uno por página. Te lo devolvemos con un código QR pegado <b>en cada página</b>, listo para imprimir y pegar en cada bulto. El repartidor lo escanea igual que las etiquetas de MercadoLibre Flex.</p>
+  <label>Archivo PDF</label>
   <input type="file" id="empQrArchivo" accept="application/pdf">
-  <div id="empQrForm" style="display:none;margin-top:14px">
-    <div class="cols">
-      <div><label>N° de pedido *</label><input id="empQrOrden" placeholder="ej: 82167"></div>
-      <div><label>RUT del cliente</label><input id="empQrRut" placeholder="ej: 19282020-0"></div>
+  <div id="empQrEstado" style="font-size:12.5px;margin:10px 0 0;color:var(--ink-2)"></div>
+  <div id="empQrForm" style="display:none;margin-top:12px">
+    <div id="empQrResumen" style="font-size:12.5px;margin-bottom:8px"></div>
+    <div class="tbl" style="max-height:300px">
+      <table>
+        <thead><tr><th style="width:40px">Pág.</th><th style="width:110px">N° pedido *</th><th style="width:130px">RUT</th><th>Dirección</th><th style="width:34px"></th></tr></thead>
+        <tbody id="empQrTbody"></tbody>
+      </table>
     </div>
-    <label>Dirección</label><input id="empQrDir" placeholder="ej: Sobriedad 8533">
-    <p style="color:var(--muted);font-size:11.5px;margin:8px 0 0">El QR lleva el n° de pedido más el RUT y/o la dirección, para que la app pueda confirmar con 2 datos que el bulto es el correcto.</p>
-    <div id="empQrEstado" style="font-size:12px;margin:8px 0;color:var(--ink-2)"></div>
+    <p style="color:var(--muted);font-size:11.5px;margin:8px 0 0">Cada QR lleva el n° de pedido de su página más el RUT y/o la dirección, para que la app pueda confirmar con 2 datos que el bulto es el correcto. Puedes corregir cualquier dato antes de generar.</p>
   </div>
   <div class="err" id="empQrErr"></div>
   <div class="foot">
@@ -848,117 +850,219 @@ window.verDetalleEmp = async (id)=>{
 };
 
 /* ---------- PORTAL EMPRESA: subir hoja Jumpseller y timbrar con QR ---------- */
-let empQrPdfBytes = null, empQrPedidoMatch = null;
+/* Acepta un PDF con UNO o MUCHOS pedidos (Jumpseller imprime uno por página):
+   lee cada página, detecta n° de pedido / RUT / dirección, deja corregir a mano
+   y devuelve el mismo PDF con un QR pegado en cada página. */
+let empQrPdfBytes = null, empQrFilas = [];
 
 if($('empQrAbrir')) $('empQrAbrir').onclick = ()=>{
-  empQrPdfBytes = null; empQrPedidoMatch = null;
+  empQrPdfBytes = null; empQrFilas = [];
   $('empQrArchivo').value = '';
   $('empQrForm').style.display = 'none';
   $('empQrErr').textContent = '';
   $('empQrEstado').textContent = '';
+  $('empQrTbody').innerHTML = '';
+  $('empQrGenerar').disabled = false;
+  $('empQrGenerar').textContent = '🔳 Generar PDF con QR';
   $('mEmpQr').classList.add('on');
 };
 
-async function extraerTextoPdf(bytes){
+// Datos que trae una hoja de pedido de Jumpseller
+function parsearPedidoJumpseller(texto){
+  const orden = (texto.match(/Pedido\s*#\s*(\d{2,})/i)||[])[1] || '';
+  const rut = (texto.match(/RUT:?\s*(\d{1,2}\.?\d{3}\.?\d{3}-[\dkK])/i)||[])[1] || '';
+  let dir = '';
+  const iDir = texto.search(/Direcci[oó]n de env[ií]o/i);
+  if(iDir>=0){
+    const resto = texto.slice(iDir).split('\n').map(s=>s.trim()).filter(Boolean);
+    for(let k=1;k<Math.min(resto.length,8);k++){
+      if(/\d/.test(resto[k]) && !/^regi[oó]n|^chile$/i.test(resto[k])){ dir = resto[k]; break; }
+    }
+  }
+  return {orden, rut, dir};
+}
+
+// Una fila por página del PDF
+async function extraerPedidosPdf(bytes){
   if(!window.pdfjsLib) throw new Error('No se pudo cargar el lector de PDF');
   pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-  const doc = await pdfjsLib.getDocument({data: bytes}).promise;
-  let out = '';
+  // copia: pdf.js puede "vaciar" el buffer al mandarlo al worker y después
+  // pdf-lib necesita los bytes originales intactos
+  const doc = await pdfjsLib.getDocument({data: bytes.slice()}).promise;
+  const filas = [];
   for(let i=1;i<=doc.numPages;i++){
     const pag = await doc.getPage(i);
     const cont = await pag.getTextContent();
-    out += cont.items.map(it=>it.str).join('\n') + '\n';
+    const texto = cont.items.map(it=>it.str).join('\n');
+    filas.push({pagina:i, ...parsearPedidoJumpseller(texto)});
   }
-  return out;
+  return filas;
+}
+
+function empQrRecalcular(f){
+  f.match = f.orden ? (empPedidos.find(p=>String(p.externo_id)===String(f.orden)) || null) : null;
+}
+
+function pintarEmpQr(){
+  const n = empQrFilas.length;
+  const conMatch = empQrFilas.filter(f=>f.match).length;
+  const listas = empQrFilas.filter(f=>f.orden && (f.rut||f.dir)).length;
+  $('empQrResumen').innerHTML =
+    `<b>${n}</b> ${n===1?'pedido detectado':'pedidos detectados'} en el PDF · <b>${listas}</b> con datos suficientes para el QR · <b>${conMatch}</b> ${conMatch===1?'coincide':'coinciden'} con tus envíos en ZAS`;
+  const inp = 'padding:4px 6px;font-size:12px';
+  $('empQrTbody').innerHTML = empQrFilas.map((f,i)=>{
+    const icono = !f.orden ? '<span title="Falta el n° de pedido">❌</span>'
+      : !(f.rut||f.dir) ? '<span title="Falta RUT o dirección">⚠️</span>'
+      : f.match ? '<span title="Coincide con un pedido tuyo en ZAS">✅</span>'
+      : '<span title="Aún no está en ZAS — el QR igual sirve">🕓</span>';
+    return `<tr>
+      <td style="text-align:center;color:var(--muted);font-size:11px">${f.pagina}</td>
+      <td><input data-i="${i}" data-k="orden" value="${esc(f.orden)}" style="${inp}"></td>
+      <td><input data-i="${i}" data-k="rut" value="${esc(f.rut)}" style="${inp}"></td>
+      <td><input data-i="${i}" data-k="dir" value="${esc(f.dir)}" style="${inp}"></td>
+      <td style="text-align:center">${icono}</td>
+    </tr>`;
+  }).join('');
+}
+
+if($('empQrTbody')) $('empQrTbody').addEventListener('input', e=>{
+  const t = e.target; if(!t.dataset || t.dataset.i===undefined) return;
+  const f = empQrFilas[+t.dataset.i]; if(!f) return;
+  f[t.dataset.k] = t.value.trim();
+  if(t.dataset.k==='orden') empQrRecalcular(f);
+  // solo refrescamos el resumen y el icono: repintar la tabla entera
+  // haría perder el foco mientras se escribe
+  const fila = t.closest('tr');
+  if(fila){
+    const icono = !f.orden ? '❌' : !(f.rut||f.dir) ? '⚠️' : f.match ? '✅' : '🕓';
+    fila.lastElementChild.innerHTML = icono;
+  }
+  const n = empQrFilas.length;
+  const conMatch = empQrFilas.filter(x=>x.match).length;
+  const listas = empQrFilas.filter(x=>x.orden && (x.rut||x.dir)).length;
+  $('empQrResumen').innerHTML =
+    `<b>${n}</b> ${n===1?'pedido detectado':'pedidos detectados'} en el PDF · <b>${listas}</b> con datos suficientes para el QR · <b>${conMatch}</b> ${conMatch===1?'coincide':'coinciden'} con tus envíos en ZAS`;
+});
+
+// La librería qrcodejs calcula mal el tamaño cuando el texto trae tildes o ñ
+// (se le desborda el código). Como la app normaliza igual antes de comparar,
+// mandamos el QR en ASCII puro.
+function soloAscii(s){
+  return (s||'').toString()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/[ñÑ]/g,'n').replace(/[^\x20-\x7E]/g,'')
+    .replace(/\s+/g,' ').trim();
+}
+
+// arma el contenido del QR: n° de pedido + RUT y/o dirección (≥2 datos)
+function payloadQrJumpseller(f){
+  const dir = soloAscii(f.dir).slice(0,40);
+  const rut = soloAscii(f.rut);
+  return JSON.stringify({t:'ZJS', o:soloAscii(f.orden), ...(rut?{r:rut}:{}), ...(dir?{d:dir}:{})});
 }
 
 // genera un PNG del QR (data URL) renderizando la librería qrcodejs en un div oculto
-function generarQrDataUrl(texto){
+function generarQrDataUrl(texto, nivel){
   return new Promise((resolve,reject)=>{
     try{
       const tmp = document.createElement('div');
       tmp.style.cssText = 'position:fixed;left:-9999px;top:-9999px';
       document.body.appendChild(tmp);
-      new QRCode(tmp, {text: texto, width:240, height:240, correctLevel: QRCode.CorrectLevel.M});
-      setTimeout(()=>{
+      new QRCode(tmp, {text: texto, width:240, height:240,
+        correctLevel: nivel !== undefined ? nivel : QRCode.CorrectLevel.M});
+      const leer = (intentos)=>{
         const canvas = tmp.querySelector('canvas');
         const img = tmp.querySelector('img');
-        const dataUrl = canvas ? canvas.toDataURL('image/png') : (img ? img.src : null);
-        document.body.removeChild(tmp);
-        dataUrl ? resolve(dataUrl) : reject(new Error('No se pudo generar el QR'));
-      }, 150);
+        const dataUrl = canvas ? canvas.toDataURL('image/png')
+          : (img && img.src && img.src.startsWith('data:') ? img.src : null);
+        if(dataUrl){ document.body.removeChild(tmp); resolve(dataUrl); return; }
+        if(intentos<=0){ document.body.removeChild(tmp); reject(new Error('No se pudo generar el QR')); return; }
+        setTimeout(()=>leer(intentos-1), 60);
+      };
+      leer(12);
     }catch(e){ reject(e); }
   });
 }
 
 if($('empQrArchivo')) $('empQrArchivo').onchange = async (e)=>{
   const f = e.target.files[0]; if(!f) return;
-  empQrPdfBytes = null; empQrPedidoMatch = null;
+  empQrPdfBytes = null; empQrFilas = [];
   $('empQrErr').textContent = '';
-  $('empQrForm').style.display = 'block';
-  $('empQrEstado').textContent = 'Leyendo PDF…';
-  $('empQrOrden').value = ''; $('empQrRut').value = ''; $('empQrDir').value = '';
+  $('empQrForm').style.display = 'none';
+  $('empQrEstado').textContent = '⏳ Leyendo el PDF…';
   try{
     empQrPdfBytes = new Uint8Array(await f.arrayBuffer());
-    const texto = await extraerTextoPdf(empQrPdfBytes);
-    const orden = (texto.match(/Pedido\s*#\s*(\d{2,})/i)||[])[1] || '';
-    const rut = (texto.match(/RUT:?\s*(\d{1,2}\.?\d{3}\.?\d{3}-[\dkK])/i)||[])[1] || '';
-    // dirección: primera línea con número dentro de las líneas siguientes a "Dirección de envío"
-    let dir = '';
-    const iDir = texto.search(/Direcci[oó]n de env[ií]o/i);
-    if(iDir>=0){
-      const resto = texto.slice(iDir).split('\n').map(s=>s.trim()).filter(Boolean);
-      for(let k=1;k<Math.min(resto.length,8);k++){
-        if(/\d/.test(resto[k]) && !/^regi[oó]n|^chile$/i.test(resto[k])){ dir = resto[k]; break; }
-      }
-    }
-    $('empQrOrden').value = orden;
-    $('empQrRut').value = rut;
-    $('empQrDir').value = dir;
-    empQrPedidoMatch = orden ? empPedidos.find(p=>String(p.externo_id)===String(orden)) : null;
-    $('empQrEstado').innerHTML = empQrPedidoMatch
-      ? `✅ Coincide con el pedido de <b>${esc(empQrPedidoMatch.cliente_nombre)}</b> — ${esc(empQrPedidoMatch.direccion)}`
-      : (orden
-          ? `⚠️ Aún no veo el pedido #${esc(orden)} en tus envíos con ZAS — puedes generar igual el QR, se validará cuando el pedido llegue al sistema`
-          : '⚠️ No detecté el N° de pedido automáticamente — complétalo abajo');
+    empQrFilas = await extraerPedidosPdf(empQrPdfBytes);
+    empQrFilas.forEach(empQrRecalcular);
+    const sinOrden = empQrFilas.filter(x=>!x.orden).length;
+    $('empQrEstado').innerHTML = sinOrden
+      ? `⚠️ Leí ${empQrFilas.length} página(s), pero en ${sinOrden} no encontré el n° de pedido — complétalo(s) abajo.`
+      : `✅ Leí ${empQrFilas.length} página(s) del PDF.`;
+    $('empQrForm').style.display = 'block';
+    pintarEmpQr();
   }catch(err){
     console.error(err);
     $('empQrEstado').textContent = '';
-    $('empQrErr').textContent = 'No pude leer ese PDF automáticamente. Completa los datos abajo y genera igual.';
+    $('empQrErr').textContent = 'No pude leer ese PDF: '+(err.message||err);
   }
 };
 
 if($('empQrGenerar')) $('empQrGenerar').onclick = async ()=>{
-  const orden = $('empQrOrden').value.trim();
-  const rut = $('empQrRut').value.trim();
-  const dir = $('empQrDir').value.trim();
   $('empQrErr').textContent = '';
-  if(!orden){ $('empQrErr').textContent = 'Ingresa el N° de pedido.'; return; }
-  if(!rut && !dir){ $('empQrErr').textContent = 'Ingresa además el RUT o la dirección, para poder validar el bulto con 2 datos.'; return; }
-  if(!empQrPdfBytes){ $('empQrErr').textContent = 'Sube primero el PDF del pedido.'; return; }
+  if(!empQrPdfBytes || !empQrFilas.length){ $('empQrErr').textContent = 'Sube primero el PDF de los pedidos.'; return; }
+  const listas = empQrFilas.filter(f=>f.orden && (f.rut||f.dir));
+  const fuera = empQrFilas.length - listas.length;
+  if(!listas.length){
+    $('empQrErr').textContent = 'Ninguna página tiene n° de pedido más RUT o dirección. Completa al menos esos datos para poder validar el bulto con 2 datos.';
+    return;
+  }
+  if(fuera>0 && !confirm(`${fuera} página(s) no tienen n° de pedido más RUT o dirección y quedarán SIN QR.\n\n¿Generar igual el PDF con las otras ${listas.length}?`)) return;
   const boton = $('empQrGenerar');
-  boton.disabled = true; boton.textContent = 'Generando…';
+  boton.disabled = true;
   try{
-    const payload = JSON.stringify({t:'ZJS', o:orden, ...(rut?{r:rut}:{}) , ...(dir?{d:dir}:{})});
-    const qrDataUrl = await generarQrDataUrl(payload);
     const { PDFDocument } = PDFLib;
-    const pdfDoc = await PDFDocument.load(empQrPdfBytes);
-    const png = await pdfDoc.embedPng(qrDataUrl);
-    const pagina = pdfDoc.getPages()[0];
-    const { width, height } = pagina.getSize();
-    const tam = 110;
-    pagina.drawImage(png, { x: width - tam - 24, y: height - tam - 24, width: tam, height: tam });
-    pagina.drawText('Escanear para validar - ZAS Reparto', { x: width - tam - 26, y: height - tam - 36, size: 7 });
-    const bytesFinal = await pdfDoc.save();
-    const blob = new Blob([bytesFinal], {type:'application/pdf'});
+    const pdfDoc = await PDFDocument.load(empQrPdfBytes.slice());
+    const paginas = pdfDoc.getPages();
+    const tam = 96;
+    for(let k=0;k<listas.length;k++){
+      const f = listas[k];
+      boton.textContent = `Generando ${k+1} de ${listas.length}…`;
+      const payload = payloadQrJumpseller(f);
+      let dataUrl;
+      try{
+        dataUrl = await generarQrDataUrl(payload);
+      }catch(_){
+        // red de seguridad: menos corrección de errores y, si aún no cabe,
+        // el QR sin la dirección (queda pedido + RUT, que siguen siendo 2 datos)
+        try{ dataUrl = await generarQrDataUrl(payload, QRCode.CorrectLevel.L); }
+        catch(__){ dataUrl = await generarQrDataUrl(payloadQrJumpseller({...f, dir:''})); }
+      }
+      const png = await pdfDoc.embedPng(dataUrl);
+      const pagina = paginas[f.pagina-1];
+      if(!pagina) continue;
+      const { height } = pagina.getSize();
+      // arriba, al costado del logo: en la hoja de Jumpseller el logo llega
+      // hasta ~x111 y el título "Pedido #" recién empieza en ~x682
+      const x = 132, y = height - 38 - tam;
+      // fondo blanco por si algo queda debajo (el QR debe leerse siempre)
+      pagina.drawRectangle({ x: x-5, y: y-16, width: tam+10, height: tam+21,
+        color: PDFLib.rgb(1,1,1) });
+      pagina.drawImage(png, { x, y, width: tam, height: tam });
+      pagina.drawText(`Pedido ${f.orden} - ZAS Reparto`, { x, y: y-11, size: 7.5 });
+    }
+    const blob = new Blob([await pdfDoc.save()], {type:'application/pdf'});
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = `Pedido-${orden}-QR-ZAS.pdf`; document.body.appendChild(a); a.click(); a.remove();
+    a.href = url;
+    a.download = listas.length===1 ? `Pedido-${listas[0].orden}-QR-ZAS.pdf`
+                                   : `Etiquetas-QR-ZAS-${listas.length}-pedidos.pdf`;
+    document.body.appendChild(a); a.click(); a.remove();
     setTimeout(()=>URL.revokeObjectURL(url), 4000);
-    if(empQrPedidoMatch && rut){
-      sb.from('pedidos').update({rut}).eq('id', empQrPedidoMatch.id).then(()=>{});
-    }
-    toast('✅ PDF con QR generado y descargado');
+    // guardar el RUT en los pedidos que sí están en ZAS (para futuras validaciones)
+    listas.filter(f=>f.match && f.rut).forEach(f=>{
+      sb.from('pedidos').update({rut:f.rut}).eq('id', f.match.id).then(()=>{}, ()=>{});
+    });
+    toast(`✅ PDF generado con ${listas.length} etiqueta(s) QR`);
   }catch(err){
     console.error(err);
     $('empQrErr').textContent = 'No se pudo generar el PDF con QR: '+(err.message||err);
