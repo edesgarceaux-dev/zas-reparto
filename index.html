@@ -169,7 +169,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         <button class="btn" id="nuevoPedido">+ Nuevo pedido</button>
       </div>
       <div class="tbl"><table id="tblPedidos">
-        <thead><tr><th>Código</th><th>Cliente final</th><th>Dirección</th><th>Comuna</th><th>Empresa</th><th>Repartidor</th><th>Estado</th><th>Hora</th></tr></thead>
+        <thead><tr><th>Código</th><th>Cliente final</th><th>Teléfono</th><th>Dirección</th><th>Comuna</th><th>Empresa</th><th>Repartidor</th><th>Estado</th><th>Fecha pedido</th><th></th></tr></thead>
         <tbody id="tbodyPed"></tbody>
       </table></div>
     </section>
@@ -588,13 +588,17 @@ function pintarPedidos(){
     <tr onclick="verDetalle(${p.id})">
       <td class="cod">${esc(p.codigo||'#'+p.id)}${p.origen==='jumpseller'?' <span style="color:#1baf7a" title="Ingresó automáticamente desde la tienda">⚡</span>':''}</td>
       <td><b>${esc(p.cliente_nombre)}</b></td>
+      <td>${p.cliente_telefono? `<a href="tel:${esc(p.cliente_telefono)}" onclick="event.stopPropagation()" style="color:inherit;text-decoration:none">${esc(p.cliente_telefono)}</a>` : '<span class="cod">—</span>'}</td>
       <td>${esc(p.direccion)}</td>
       <td>${p.comuna? esc(p.comuna) : '<span class="cod">—</span>'}</td>
       <td>${p.cliente_id? esc(clienteDe(p.cliente_id)||'…') : '<span class="cod">—</span>'}</td>
       <td>${p.repartidor_id? esc(nombreDe(p.repartidor_id)) : '<span class="cod">—</span>'}</td>
       <td>${stChip(p.estado)}</td>
-      <td class="cod">${hora(p.creado_en)}</td>
-    </tr>`).join('') : '<tr><td colspan="8" class="empty">No hay pedidos con este filtro.</td></tr>';
+      <td class="cod">${fechaHora(p.creado_en)}</td>
+      <td><a class="btn btn-ghost" style="padding:4px 10px;text-decoration:none" target="_blank" title="Ver dirección en Google Maps"
+        onclick="event.stopPropagation()"
+        href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent((p.direccion||'')+(p.comuna?', '+p.comuna:''))}">🗺️</a></td>
+    </tr>`).join('') : '<tr><td colspan="10" class="empty">No hay pedidos con este filtro.</td></tr>';
 }
 
 function pintarReps(){

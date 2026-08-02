@@ -46,7 +46,20 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
 
+    // Fecha y hora reales del pedido en la tienda
+    let creadoEn: string | null = null;
+    let fechaPedido: string | null = null;
+    if (o.created_at) {
+      const d = new Date(String(o.created_at).replace(" UTC", "Z").replace(" ", "T"));
+      if (!isNaN(d.getTime())) {
+        creadoEn = d.toISOString();
+        fechaPedido = d.toLocaleDateString("en-CA", { timeZone: "America/Santiago" });
+      }
+    }
+
     const { error } = await supa.from("pedidos").upsert({
+      ...(creadoEn ? { creado_en: creadoEn } : {}),
+      ...(fechaPedido ? { fecha_pedido: fechaPedido } : {}),
       cliente_id: clienteId,
       externo_id: String(o.id),
       cliente_nombre: comprador,
@@ -58,7 +71,9 @@ Deno.serve(async (req) => {
       monto: o.total ?? null,
       metodo_pago: "pagado",
       origen: "jumpseller",
-    }, { onConflict: "cliente_id,externo_id", ignoreDuplicates: true });
+    }, { onConflict: "cliente_id,externo_id" });
+    // Nota: al repetirse un aviso se actualizan los datos de la tienda,
+    // pero estado, repartidor y notas de entrega NO se tocan (no vienen en este upsert).
 
     if (error) {
       console.error("error insertando pedido:", error.message);
