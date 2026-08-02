@@ -1160,7 +1160,7 @@ function dibujarRuta(){
     const icono = L.divIcon({ className:'', iconSize:[28,28], iconAnchor:[14,14],
       html:`<div style="width:28px;height:28px;border-radius:50%;background:${col};color:#fff;display:flex;align-items:center;justify-content:center;font:700 12px system-ui;border:2px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.4);${activo?'':'opacity:.85'}">${n}</div>` });
     L.marker([p.lat,p.lng], {icon:icono}).addTo(capaPuntos).bindPopup(
-      `<b>Parada ${n} · ${EstadoPedido.etiqueta(p.estado)}</b> · ${esc(p.codigo||'')}<br>` +
+      `<b>Parada ${n} · ${(EST[p.estado]?.[0]) || p.estado}</b> · ${esc(p.codigo||'')}<br>` +
       `${esc(p.cliente_nombre)}<br>${esc(p.direccion)}${p.comuna?', '+esc(p.comuna):''}` +
       (p.cliente_telefono?`<br>📞 ${esc(p.cliente_telefono)}`:''));
     if(activo) puntosActivos.push([p.lat,p.lng]);
