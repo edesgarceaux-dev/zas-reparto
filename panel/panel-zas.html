@@ -209,20 +209,41 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     <!-- Mapa -->
     <section id="t-mapa" style="display:none">
       <div class="bar">
-        <select id="rutaRep" style="width:auto;min-width:220px" onchange="dibujarRuta()"></select>
+        <select id="rutaRep" style="width:auto;min-width:200px" onchange="dibujarRuta()"></select>
+        <select id="selPartida" style="width:auto;min-width:200px" onchange="elegirPartida()"></select>
         <button class="btn" id="btnOptimizar" onclick="optimizarRuta()">✨ Optimizar ruta</button>
         <button class="btn btn-ghost" id="btnGuardarOrden" onclick="guardarOrden()" style="display:none">💾 Guardar este orden</button>
         <span class="sp"></span>
         <span id="geoEstado" style="font-size:12px;color:var(--muted)"></span>
       </div>
-      <div id="mapa" style="height:calc(100vh - 210px);border-radius:12px;border:1px solid var(--border)"></div>
-      <div style="display:flex;gap:14px;padding:8px 4px;font-size:12px;color:var(--ink-2);flex-wrap:wrap">
-        <span>⬤ <b style="color:#52514e">Asignado</b></span>
-        <span>⬤ <b style="color:#2a78d6">Aceptado</b></span>
-        <span>⬤ <b style="color:#eda100">En camino</b></span>
-        <span>⬤ <b style="color:#0ca30c">Entregado</b></span>
-        <span>⬤ <b style="color:#d03b3b">No entregado</b></span>
-        <span style="margin-left:auto">Los números indican el orden de visita; la línea es la ruta.</span>
+      <div style="display:flex;gap:12px;align-items:stretch">
+        <div style="flex:1;min-width:0">
+          <div id="mapa" style="height:calc(100vh - 240px);border-radius:12px;border:1px solid var(--border)"></div>
+          <div style="display:flex;gap:14px;padding:8px 4px;font-size:12px;color:var(--ink-2);flex-wrap:wrap;align-items:center">
+            <span>🏠 Partida</span>
+            <span>⬤ <b style="color:#52514e">Asignado</b></span>
+            <span>⬤ <b style="color:#2a78d6">Aceptado</b></span>
+            <span>⬤ <b style="color:#eda100">En camino</b></span>
+            <span>⬤ <b style="color:#0ca30c">Entregado</b></span>
+            <span>⬤ <b style="color:#d03b3b">No entregado</b></span>
+            <span id="rutaInfo" style="margin-left:auto;font-weight:600;color:var(--ink)"></span>
+          </div>
+          <div style="font-size:11px;color:var(--muted);padding:0 4px">
+            Criterio de optimización: menor <b>distancia total del recorrido</b> partiendo desde el punto de partida
+            (vecino más cercano + corrección de cruces 2-opt, distancias en línea recta entre paradas).
+          </div>
+        </div>
+        <div style="width:340px;display:flex;flex-direction:column;gap:10px;max-height:calc(100vh - 200px)">
+          <div class="tile" style="padding:12px;overflow:auto;flex:1">
+            <b style="font-size:13px">Orden de la ruta</b>
+            <div style="font-size:11px;color:var(--muted);margin-bottom:6px">Usa ▲▼ para ajustar a mano antes de guardar.</div>
+            <div id="listaOrden"></div>
+          </div>
+          <div class="tile" style="padding:12px;overflow:auto;max-height:38%">
+            <b style="font-size:13px;color:#d03b3b">Direcciones sin ubicar</b>
+            <div id="listaSinUbicar" style="margin-top:6px"><span class="cod">Todas las direcciones están ubicadas ✓</span></div>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -873,7 +894,15 @@ document.querySelectorAll('nav button').forEach(b=> b.onclick = ()=>{
 
 /* ---------- MAPA DE RUTAS ---------- */
 let mapa = null, capaPuntos = null, capaLinea = null, ordenPropuesto = null, geocodificando = false;
+let puntoPartida = null, marcadorPartida = null;   // {lat, lng, nombre}
+const geoFallos = {};                              // id pedido -> motivo
 const hoyDia = () => hoyStr();
+const distKm = (a,b)=>{ // haversine
+  const R=6371, rad=x=>x*Math.PI/180;
+  const dLat=rad(b.lat-a.lat), dLng=rad(b.lng-a.lng);
+  const h=Math.sin(dLat/2)**2 + Math.cos(rad(a.lat))*Math.cos(rad(b.lat))*Math.sin(dLng/2)**2;
+  return 2*R*Math.asin(Math.sqrt(h));
+};
 
 function iniciarMapa(){
   if(typeof L === 'undefined'){ toast('No se pudo cargar el mapa (revisa tu internet)'); return; }
@@ -884,11 +913,60 @@ function iniciarMapa(){
     }).addTo(mapa);
     capaPuntos = L.layerGroup().addTo(mapa);
     capaLinea = L.layerGroup().addTo(mapa);
+    try{ const g = JSON.parse(localStorage.getItem('zas-partida')||'null'); if(g) puntoPartida = g; }catch(_){}
   }
   setTimeout(()=>mapa.invalidateSize(), 100);
   poblarSelectorRuta();
+  poblarSelectorPartida();
   dibujarRuta();
   geocodificarFaltantes();
+}
+
+/* ----- punto de partida (bodega) ----- */
+function poblarSelectorPartida(){
+  const sel = $('selPartida'); const valor = sel.value;
+  sel.innerHTML = `<option value="">🏠 Partida: ${puntoPartida ? esc(puntoPartida.nombre) : 'automática (centro)'}</option>` +
+    clientes.filter(c=>c.direccion_retiro).map(c=>`<option value="cli-${c.id}">🏭 Bodega ${esc(c.nombre)}</option>`).join('') +
+    `<option value="mapa">🖱️ Elegir con un clic en el mapa</option>` +
+    (puntoPartida ? `<option value="quitar">✕ Quitar punto de partida</option>` : '');
+  sel.value = '';
+}
+async function elegirPartida(){
+  const v = $('selPartida').value;
+  if(!v) return;
+  if(v === 'quitar'){
+    puntoPartida = null; localStorage.removeItem('zas-partida');
+    poblarSelectorPartida(); dibujarRuta(); return;
+  }
+  if(v === 'mapa'){
+    toast('Haz clic en el mapa donde está tu bodega');
+    mapa.once('click', e=>{
+      puntoPartida = { lat: e.latlng.lat, lng: e.latlng.lng, nombre: 'Punto elegido en el mapa' };
+      localStorage.setItem('zas-partida', JSON.stringify(puntoPartida));
+      poblarSelectorPartida(); dibujarRuta();
+      toast('Punto de partida fijado');
+    });
+    $('selPartida').value=''; return;
+  }
+  if(v.startsWith('cli-')){
+    const c = clientes.find(x=>x.id===Number(v.slice(4)));
+    if(!c) return;
+    $('geoEstado').textContent = 'Ubicando la bodega…';
+    try{
+      const q = encodeURIComponent(`${c.direccion_retiro}, ${c.comuna||''}, Chile`);
+      const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=cl&q=${q}`);
+      const g = await r.json();
+      if(g?.[0]){
+        puntoPartida = { lat:+g[0].lat, lng:+g[0].lon, nombre: 'Bodega '+c.nombre };
+        localStorage.setItem('zas-partida', JSON.stringify(puntoPartida));
+        toast('Punto de partida: bodega de '+c.nombre);
+      } else {
+        toast('No se pudo ubicar la bodega — usa "Elegir con un clic en el mapa"');
+      }
+    }catch(_){ toast('Error de conexión al ubicar la bodega'); }
+    $('geoEstado').textContent = '';
+    poblarSelectorPartida(); dibujarRuta();
+  }
 }
 
 function poblarSelectorRuta(){
@@ -938,11 +1016,94 @@ function dibujarRuta(){
       (p.cliente_telefono?`<br>📞 ${esc(p.cliente_telefono)}`:''));
     if(activo) puntosActivos.push([p.lat,p.lng]);
   }
-  if(puntosActivos.length>1){
-    L.polyline(puntosActivos, {color:'#e85d04', weight:3, opacity:.75, dashArray:'6 8'}).addTo(capaLinea);
+  // punto de partida
+  if(puntoPartida){
+    const iconoCasa = L.divIcon({ className:'', iconSize:[30,30], iconAnchor:[15,15],
+      html:`<div style="width:30px;height:30px;border-radius:8px;background:#0b0b0b;color:#fff;display:flex;align-items:center;justify-content:center;font-size:16px;border:2px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.4)">🏠</div>` });
+    L.marker([puntoPartida.lat, puntoPartida.lng], {icon:iconoCasa}).addTo(capaPuntos)
+      .bindPopup(`<b>Punto de partida</b><br>${esc(puntoPartida.nombre)}`);
+  }
+  const trayecto = puntoPartida ? [[puntoPartida.lat,puntoPartida.lng], ...puntosActivos] : puntosActivos;
+  if(trayecto.length>1){
+    L.polyline(trayecto, {color:'#e85d04', weight:3, opacity:.75, dashArray:'6 8'}).addTo(capaLinea);
+    let km = 0;
+    for(let i=1;i<trayecto.length;i++) km += distKm({lat:trayecto[i-1][0],lng:trayecto[i-1][1]},{lat:trayecto[i][0],lng:trayecto[i][1]});
+    $('rutaInfo').textContent = `Recorrido: ${km.toFixed(1)} km (línea recta) · ${puntosActivos.length} paradas`;
+  } else {
+    $('rutaInfo').textContent = '';
   }
   const grupo = L.featureGroup([...capaPuntos.getLayers()]);
   if(grupo.getLayers().length) mapa.fitBounds(grupo.getBounds().pad(0.2));
+  pintarListaOrden(lista.filter(p=>!FIN.includes(p.estado)));
+  pintarSinUbicar();
+}
+
+/* ----- lista editable del orden ----- */
+function pintarListaOrden(activos){
+  const el = $('listaOrden');
+  if(!activos.length){ el.innerHTML = '<span class="cod">No hay paradas activas para esta selección.</span>'; return; }
+  el.innerHTML = activos.map((p,i)=>`
+    <div style="display:flex;align-items:center;gap:6px;padding:5px 0;border-bottom:1px dashed var(--grid);font-size:12px">
+      <span style="background:${p.lat!=null?'var(--brand)':'#c3c2b7'};color:#fff;border-radius:99px;min-width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center;font-weight:700">${i+1}</span>
+      <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(p.direccion)}">
+        <b>${esc(p.cliente_nombre)}</b> · ${esc(p.comuna||p.direccion)}${p.lat==null?' ⚠️':''}
+      </span>
+      <button class="btn btn-ghost" style="padding:1px 7px" ${i===0?'disabled':''} onclick="moverParada(${i},-1)">▲</button>
+      <button class="btn btn-ghost" style="padding:1px 7px" ${i===activos.length-1?'disabled':''} onclick="moverParada(${i},1)">▼</button>
+    </div>`).join('');
+}
+window.moverParada = (i, dir)=>{
+  const activos = ordenarParaRuta(pedidosDeRuta()).filter(p=>!FIN.includes(p.estado));
+  const orden = activos.map(p=>p.id);
+  const j = i + dir;
+  if(j<0 || j>=orden.length) return;
+  [orden[i], orden[j]] = [orden[j], orden[i]];
+  ordenPropuesto = orden;
+  $('btnGuardarOrden').style.display = 'inline-block';
+  dibujarRuta();
+};
+
+/* ----- direcciones sin ubicar: motivo y corrección ----- */
+function pintarSinUbicar(){
+  const el = $('listaSinUbicar');
+  const sin = pedidos.filter(p=>!FIN.includes(p.estado) && (p.lat==null || p.lng==null));
+  if(!sin.length){ el.innerHTML = '<span class="cod">Todas las direcciones están ubicadas ✓</span>'; return; }
+  el.innerHTML = sin.map(p=>`
+    <div style="border:1px solid var(--grid);border-radius:8px;padding:8px;margin-bottom:8px;font-size:12px">
+      <b>${esc(p.codigo||'#'+p.id)}</b> · ${esc(p.cliente_nombre)}
+      <div style="color:#d03b3b;margin:2px 0">${esc(geoFallos[p.id] || 'Pendiente de ubicar (abre el mapa y espera)')}</div>
+      <input id="fixDir-${p.id}" value="${esc(p.direccion)}" style="margin:3px 0;font-size:12px;padding:5px 8px" placeholder="Dirección">
+      <input id="fixCom-${p.id}" value="${esc(p.comuna||'')}" style="margin:0 0 5px;font-size:12px;padding:5px 8px" placeholder="Comuna">
+      <button class="btn" style="padding:4px 12px;font-size:12px" onclick="corregirDireccion(${p.id})">Reintentar ubicación</button>
+    </div>`).join('');
+}
+window.corregirDireccion = async (id)=>{
+  const p = pedidos.find(x=>x.id===id); if(!p) return;
+  const dir = $('fixDir-'+id).value.trim(), com = $('fixCom-'+id).value.trim();
+  if(!dir){ toast('Escribe una dirección'); return; }
+  $('geoEstado').textContent = 'Buscando dirección corregida…';
+  try{
+    const q = encodeURIComponent(`${dir}, ${com||''}, Chile`);
+    const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=cl&q=${q}`);
+    const g = await r.json();
+    if(g?.[0]){
+      const cambios = { direccion:dir, comuna:com||null, lat:+g[0].lat, lng:+g[0].lon };
+      const { error } = await sb.from('pedidos').update(cambios).eq('id', id);
+      if(error){ toast('Error al guardar: '+error.message); }
+      else {
+        Object.assign(p, cambios); delete geoFallos[id];
+        toast('Dirección ubicada y corregida ✓');
+        dibujarRuta();
+      }
+    } else {
+      geoFallos[id] = 'Tampoco se encontró la dirección corregida — intenta simplificarla (calle y número, comuna)';
+      pintarSinUbicar();
+    }
+  }catch(_){
+    geoFallos[id] = 'Error de conexión al buscar — reintenta en unos segundos';
+    pintarSinUbicar();
+  }
+  $('geoEstado').textContent = '';
 }
 
 /* geocodificar direcciones que faltan (1 por segundo, se guardan en la base) */
@@ -960,9 +1121,14 @@ async function geocodificarFaltantes(){
       const g = await r.json();
       if(g?.[0]){
         p.lat = Number(g[0].lat); p.lng = Number(g[0].lon);
+        delete geoFallos[p.id];
         await sb.from('pedidos').update({lat:p.lat, lng:p.lng}).eq('id', p.id);
+      } else {
+        geoFallos[p.id] = 'El mapa no encontró esta dirección — revisa que calle, número y comuna estén bien escritos';
       }
-    }catch(_){}
+    }catch(_){
+      geoFallos[p.id] = 'Error de conexión al buscar la dirección';
+    }
     hechas++;
     await new Promise(res=>setTimeout(res, 1100)); // respeto del límite de OpenStreetMap
   }
@@ -971,26 +1137,51 @@ async function geocodificarFaltantes(){
   dibujarRuta();
 }
 
-/* optimización: vecino más cercano desde la bodega (o el centro de los puntos) */
+/* optimización: menor distancia total desde el punto de partida
+   (vecino más cercano + mejora 2-opt que elimina cruces) */
 window.optimizarRuta = ()=>{
   const activos = pedidosDeRuta().filter(p=>!FIN.includes(p.estado) && p.lat!=null);
+  const sinUbicar = pedidosDeRuta().filter(p=>!FIN.includes(p.estado) && p.lat==null).length;
   if(activos.length<2){ toast('Se necesitan al menos 2 pedidos ubicados'); return; }
-  const d = (a,b)=> Math.hypot(a.lat-b.lat, (a.lng-b.lng)*Math.cos(a.lat*Math.PI/180));
-  // punto de partida: bodega del cliente más frecuente si está ubicada; si no, el centroide
-  let inicio = { lat: activos.reduce((s,p)=>s+p.lat,0)/activos.length,
-                 lng: activos.reduce((s,p)=>s+p.lng,0)/activos.length };
-  const pendientes = [...activos]; const orden = [];
+  const inicio = puntoPartida ?? {
+    lat: activos.reduce((s,p)=>s+p.lat,0)/activos.length,
+    lng: activos.reduce((s,p)=>s+p.lng,0)/activos.length,
+  };
+  const kmDe = ruta => {
+    let km = distKm(inicio, ruta[0]);
+    for(let i=1;i<ruta.length;i++) km += distKm(ruta[i-1], ruta[i]);
+    return km;
+  };
+  const kmAntes = kmDe(ordenarParaRuta(activos));
+  // 1) vecino más cercano desde la partida
+  const pendientes = [...activos]; let ruta = [];
   let actual = inicio;
   while(pendientes.length){
     let mejor = 0;
-    for(let i=1;i<pendientes.length;i++) if(d(actual,pendientes[i]) < d(actual,pendientes[mejor])) mejor = i;
+    for(let i=1;i<pendientes.length;i++) if(distKm(actual,pendientes[i]) < distKm(actual,pendientes[mejor])) mejor = i;
     const sig = pendientes.splice(mejor,1)[0];
-    orden.push(sig.id); actual = sig;
+    ruta.push(sig); actual = sig;
   }
-  ordenPropuesto = orden;
+  // 2) mejora 2-opt: deshace cruces mientras siga bajando la distancia
+  let mejoro = true, vueltas = 0;
+  while(mejoro && vueltas++ < 30){
+    mejoro = false;
+    for(let i=0;i<ruta.length-1;i++){
+      for(let j=i+1;j<ruta.length;j++){
+        const candidata = [...ruta.slice(0,i), ...ruta.slice(i,j+1).reverse(), ...ruta.slice(j+1)];
+        if(kmDe(candidata) < kmDe(ruta) - 0.001){ ruta = candidata; mejoro = true; }
+      }
+    }
+  }
+  const kmDespues = kmDe(ruta);
+  ordenPropuesto = ruta.map(p=>p.id);
   $('btnGuardarOrden').style.display = 'inline-block';
   dibujarRuta();
-  toast('Ruta optimizada — revisa y guarda si te gusta');
+  const ahorro = kmAntes - kmDespues;
+  toast(`Optimizada: ${kmDespues.toFixed(1)} km` +
+    (ahorro > 0.1 ? ` (ahorras ${ahorro.toFixed(1)} km)` : '') +
+    (sinUbicar ? ` · ⚠️ ${sinUbicar} sin ubicar quedaron fuera` : '') +
+    ' — ajusta con ▲▼ y guarda');
 };
 
 window.guardarOrden = async ()=>{
