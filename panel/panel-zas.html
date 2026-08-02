@@ -230,8 +230,9 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
             <span id="rutaInfo" style="margin-left:auto;font-weight:600;color:var(--ink)"></span>
           </div>
           <div style="font-size:11px;color:var(--muted);padding:0 4px">
-            Criterio de optimización: menor <b>distancia total del recorrido</b> partiendo desde el punto de partida
-            (vecino más cercano + corrección de cruces 2-opt, distancias en línea recta entre paradas).
+            Criterio de optimización: menor <b>tiempo total de conducción por calles reales</b> (OSRM/OpenStreetMap),
+            partiendo desde el punto de partida y cerrando hacia el término si lo definiste.
+            Sin conexión al ruteador, se usa distancia en línea recta (vecino más cercano + 2-opt). No considera tráfico en vivo.
           </div>
         </div>
         <div style="width:340px;display:flex;flex-direction:column;gap:10px;max-height:calc(100vh - 200px)">
@@ -1063,10 +1064,12 @@ function dibujarRuta(){
   let trayecto = puntoPartida ? [[puntoPartida.lat,puntoPartida.lng], ...puntosActivos] : puntosActivos;
   if(puntoTermino && puntosActivos.length) trayecto = [...trayecto, [puntoTermino.lat, puntoTermino.lng]];
   if(trayecto.length>1){
-    L.polyline(trayecto, {color:'#e85d04', weight:3, opacity:.75, dashArray:'6 8'}).addTo(capaLinea);
+    // primero línea recta inmediata; luego se reemplaza por el trazado real por calles
+    L.polyline(trayecto, {color:'#e85d04', weight:3, opacity:.5, dashArray:'6 8'}).addTo(capaLinea);
     let km = 0;
     for(let i=1;i<trayecto.length;i++) km += distKm({lat:trayecto[i-1][0],lng:trayecto[i-1][1]},{lat:trayecto[i][0],lng:trayecto[i][1]});
     $('rutaInfo').textContent = `Recorrido: ${km.toFixed(1)} km (línea recta) · ${puntosActivos.length} paradas`;
+    trazarPorCalles(trayecto, puntosActivos.length);
   } else {
     $('rutaInfo').textContent = '';
   }
@@ -1074,6 +1077,24 @@ function dibujarRuta(){
   if(grupo.getLayers().length) mapa.fitBounds(grupo.getBounds().pad(0.2));
   pintarListaOrden(lista.filter(p=>!FIN.includes(p.estado)));
   pintarSinUbicar();
+}
+
+/* ----- trazado real por calles (OSRM) ----- */
+let firmaRutaActual = null;
+async function trazarPorCalles(trayecto, nParadas){
+  const firma = trayecto.map(c=>c[0].toFixed(5)+','+c[1].toFixed(5)).join(';');
+  firmaRutaActual = firma;
+  try{
+    const coords = trayecto.map(c=>`${c[1]},${c[0]}`).join(';');
+    const r = await fetch(`https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson`);
+    const g = await r.json();
+    if(g.code!=='Ok' || !g.routes?.[0]) return;
+    if(firmaRutaActual!==firma) return; // la ruta cambió mientras calculábamos
+    capaLinea.clearLayers();
+    L.geoJSON(g.routes[0].geometry, {style:{color:'#e85d04', weight:4, opacity:.85}}).addTo(capaLinea);
+    const km = g.routes[0].distance/1000, min = Math.round(g.routes[0].duration/60);
+    $('rutaInfo').textContent = `Recorrido por calles: ${km.toFixed(1)} km · ~${min} min de conducción · ${nParadas} paradas`;
+  }catch(_){ /* se mantiene la línea recta */ }
 }
 
 /* ----- lista editable del orden ----- */
@@ -1230,12 +1251,45 @@ async function geocodificarFaltantes(){
   dibujarRuta();
 }
 
-/* optimización: menor distancia total desde el punto de partida
-   (vecino más cercano + mejora 2-opt que elimina cruces) */
-window.optimizarRuta = ()=>{
+/* optimización principal: menor tiempo de conducción por calles reales (OSRM /trip) */
+window.optimizarRuta = async ()=>{
   const activos = pedidosDeRuta().filter(p=>!FIN.includes(p.estado) && p.lat!=null);
   const sinUbicar = pedidosDeRuta().filter(p=>!FIN.includes(p.estado) && p.lat==null).length;
   if(activos.length<2){ toast('Se necesitan al menos 2 pedidos ubicados'); return; }
+  $('btnOptimizar').disabled = true;
+  $('geoEstado').textContent = 'Calculando la mejor ruta por calles…';
+  try{
+    const pts = [];
+    if(puntoPartida) pts.push(puntoPartida);
+    pts.push(...activos);
+    if(puntoTermino) pts.push(puntoTermino);
+    const params = new URLSearchParams({ roundtrip:'false' });
+    if(puntoPartida) params.set('source','first');
+    if(puntoTermino) params.set('destination','last');
+    const coords = pts.map(p=>`${p.lng},${p.lat}`).join(';');
+    const r = await fetch(`https://router.project-osrm.org/trip/v1/driving/${coords}?${params}`);
+    const g = await r.json();
+    if(g.code!=='Ok' || !g.trips?.[0]) throw new Error(g.message||'sin respuesta');
+    const offset = puntoPartida ? 1 : 0;
+    ordenPropuesto = activos
+      .map((p,i)=>({ id:p.id, pos:g.waypoints[i+offset].waypoint_index }))
+      .sort((a,b)=>a.pos-b.pos).map(x=>x.id);
+    $('btnGuardarOrden').style.display = 'inline-block';
+    dibujarRuta();
+    const km = g.trips[0].distance/1000, min = Math.round(g.trips[0].duration/60);
+    toast(`Optimizada por calles reales: ${km.toFixed(1)} km · ~${min} min` +
+      (sinUbicar ? ` · ⚠️ ${sinUbicar} sin ubicar quedaron fuera` : '') + ' — ajusta y guarda');
+  }catch(_){
+    toast('El ruteador de calles no respondió — optimizando en línea recta');
+    optimizarLocal(activos, sinUbicar);
+  }finally{
+    $('btnOptimizar').disabled = false;
+    $('geoEstado').textContent = '';
+  }
+};
+
+/* respaldo local: línea recta (vecino más cercano + 2-opt) */
+function optimizarLocal(activos, sinUbicar){
   const inicio = puntoPartida ?? {
     lat: activos.reduce((s,p)=>s+p.lat,0)/activos.length,
     lng: activos.reduce((s,p)=>s+p.lng,0)/activos.length,
@@ -1272,11 +1326,11 @@ window.optimizarRuta = ()=>{
   $('btnGuardarOrden').style.display = 'inline-block';
   dibujarRuta();
   const ahorro = kmAntes - kmDespues;
-  toast(`Optimizada: ${kmDespues.toFixed(1)} km` +
+  toast(`Optimizada (línea recta): ${kmDespues.toFixed(1)} km` +
     (ahorro > 0.1 ? ` (ahorras ${ahorro.toFixed(1)} km)` : '') +
     (sinUbicar ? ` · ⚠️ ${sinUbicar} sin ubicar quedaron fuera` : '') +
-    ' — ajusta con ▲▼ y guarda');
-};
+    ' — ajusta y guarda');
+}
 
 window.guardarOrden = async ()=>{
   if(!ordenPropuesto) return;
