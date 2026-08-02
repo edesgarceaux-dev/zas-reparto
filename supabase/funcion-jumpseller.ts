@@ -73,29 +73,45 @@ Deno.serve(async (req) => {
         return r.ok ? await r.json() : null;
       } catch (_) { clearTimeout(t); return null; }
     };
+    // preferir SIEMPRE el resultado más cercano a Santiago (evita ambigüedades
+    // tipo "La Florida" de La Serena vs la comuna de Santiago)
+    const dKm = (a: {lat:number,lng:number}, b: {lat:number,lng:number}) => {
+      const R = 6371, rad = (x: number) => x * Math.PI / 180;
+      const dLat = rad(b.lat - a.lat), dLng = rad(b.lng - a.lng);
+      const h = Math.sin(dLat/2)**2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng/2)**2;
+      return 2 * R * Math.asin(Math.sqrt(h));
+    };
+    const SCL = { lat: -33.45, lng: -70.66 };
+    const cercano = (arr: {lat:number,lng:number}[]) => {
+      if (!arr.length) return null;
+      const s = arr.map(c => ({ ...c, d: dKm(c, SCL) })).sort((a, b) => a.d - b.d);
+      return s.find(c => c.d <= 150) ?? s[0];
+    };
+    const elegirOSM = (g: any) =>
+      cercano((g ?? []).map((x: any) => ({ lat: +x.lat, lng: +x.lon })));
+    const aplicar = (r: {lat:number,lng:number} | null) => {
+      if (r) { lat = r.lat; lng = r.lng; }
+    };
     // 1) Nominatim estructurada (calle + comuna por separado: más precisa)
-    let g = await traer(`https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=cl&street=${encodeURIComponent(dirLimpia)}&city=${encodeURIComponent(comuna ?? "")}`);
-    if (g?.[0]) { lat = +g[0].lat; lng = +g[0].lon; }
+    aplicar(elegirOSM(await traer(`https://nominatim.openstreetmap.org/search?format=json&limit=5&countrycodes=cl&street=${encodeURIComponent(dirLimpia)}&city=${encodeURIComponent(comuna ?? "")}`)));
     // 2) Nominatim libre
     if (lat == null) {
-      g = await traer(`https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=cl&q=${encodeURIComponent(`${dirLimpia}, ${comuna ?? ""}, Chile`)}`);
-      if (g?.[0]) { lat = +g[0].lat; lng = +g[0].lon; }
+      aplicar(elegirOSM(await traer(`https://nominatim.openstreetmap.org/search?format=json&limit=5&countrycodes=cl&q=${encodeURIComponent(`${dirLimpia}, ${comuna ?? ""}, Chile`)}`)));
     }
     // 3) Photon (más tolerante a errores de escritura)
     if (lat == null) {
-      const ph = await traer(`https://photon.komoot.io/api/?q=${encodeURIComponent(`${dirLimpia} ${comuna ?? ""} Chile`)}&limit=1&lat=-33.45&lon=-70.66`);
-      const f = (ph?.features ?? []).find((x: any) => x?.properties?.countrycode === "CL");
-      if (f) { lat = f.geometry.coordinates[1]; lng = f.geometry.coordinates[0]; }
+      const ph = await traer(`https://photon.komoot.io/api/?q=${encodeURIComponent(`${dirLimpia} ${comuna ?? ""} Chile`)}&limit=5&lat=-33.45&lon=-70.66`);
+      aplicar(cercano(((ph?.features ?? []) as any[])
+        .filter((x: any) => x?.properties?.countrycode === "CL")
+        .map((f: any) => ({ lat: f.geometry.coordinates[1], lng: f.geometry.coordinates[0] }))));
     }
     // 4) sin el título del nombre (Pdte/Gral a veces difieren en el mapa)
     if (lat == null && sinTitulo !== dirLimpia) {
-      g = await traer(`https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=cl&q=${encodeURIComponent(`${sinTitulo}, ${comuna ?? ""}, Chile`)}`);
-      if (g?.[0]) { lat = +g[0].lat; lng = +g[0].lon; }
+      aplicar(elegirOSM(await traer(`https://nominatim.openstreetmap.org/search?format=json&limit=5&countrycodes=cl&q=${encodeURIComponent(`${sinTitulo}, ${comuna ?? ""}, Chile`)}`)));
     }
     // 5) último recurso: nivel de calle (sin número)
     if (lat == null && sinNumero && sinNumero !== dirLimpia) {
-      g = await traer(`https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=cl&q=${encodeURIComponent(`${sinNumero}, ${comuna ?? ""}, Chile`)}`);
-      if (g?.[0]) { lat = +g[0].lat; lng = +g[0].lon; }
+      aplicar(elegirOSM(await traer(`https://nominatim.openstreetmap.org/search?format=json&limit=5&countrycodes=cl&q=${encodeURIComponent(`${sinNumero}, ${comuna ?? ""}, Chile`)}`)));
     }
 
     // Fecha y hora reales del pedido en la tienda

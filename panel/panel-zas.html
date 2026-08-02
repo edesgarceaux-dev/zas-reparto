@@ -444,6 +444,16 @@ function toast(m){ const t=$('toast'); t.textContent=m; t.style.display='block';
 function cerrar(id){ $(id).classList.remove('on'); }
 function stChip(e){ const [lbl,ic,col]=EST[e]||[e,'•','var(--muted)']; return `<span class="st" style="color:${col}">${ic} ${lbl}</span>`; }
 
+/* aviso al volver de la autorización de MercadoLibre */
+(()=>{
+  const q = new URLSearchParams(location.search);
+  if(q.get('ml')){
+    const ok = q.get('ml')==='ok';
+    setTimeout(()=>toast(ok ? '✅ ¡MercadoLibre conectado! Las ventas Flex pagadas llegarán solas.' : '❌ MercadoLibre: '+(q.get('msg')||'error al conectar')), 800);
+    history.replaceState({}, '', location.pathname);
+  }
+})();
+
 /* ---------- LOGIN ---------- */
 $('lBtn').onclick = login;
 $('lPass').addEventListener('keydown', e=>{ if(e.key==='Enter') login(); });
@@ -1045,6 +1055,8 @@ window.corregirDireccionPedido = async (id)=>{
   $('dDirEstado').innerHTML = coords
     ? (coords.tipo==='calle'
         ? '<span style="color:#b45b00">✓ Ubicada a nivel de CALLE (el número no está en el mapa) — el punto quedará aproximado</span>'
+        : coords.tipo==='revisar'
+        ? '<span style="color:#d03b3b">⚠️ Solo se encontró LEJOS de Santiago — revisa la comuna, o en la pestaña Mapa abre el punto y usa "Mover este punto"</span>'
         : '<span style="color:#006300">✓ Dirección corregida y ubicada en el mapa</span>')
     : '<span style="color:#b45b00">Guardada, pero no se encontró en el mapa — corrígela en la pestaña Mapa o revisa la escritura</span>';
   toast('Dirección actualizada');
@@ -1255,7 +1267,8 @@ function dibujarRuta(){
     L.marker([p.lat,p.lng], {icon:icono}).addTo(capaPuntos).bindPopup(
       `<b>Parada ${n} · ${(EST[p.estado]?.[0]) || p.estado}</b> · ${esc(p.codigo||'')}<br>` +
       `${esc(p.cliente_nombre)}<br>${esc(p.direccion)}${p.comuna?', '+esc(p.comuna):''}` +
-      (p.cliente_telefono?`<br>📞 ${esc(p.cliente_telefono)}`:''));
+      (p.cliente_telefono?`<br>📞 ${esc(p.cliente_telefono)}`:'') +
+      `<br><a href="#" onclick="reubicarPedido(${p.id});return false" style="color:#E85D04;font-weight:600">📍 Mover este punto (clic en el mapa)</a>`);
     if(activo) puntosActivos.push([p.lat,p.lng]);
   }
   // punto de partida
@@ -1306,6 +1319,21 @@ async function trazarPorCalles(trayecto, nParadas){
     $('rutaInfo').textContent = `Recorrido por calles: ${km.toFixed(1)} km · ~${min} min de conducción · ${nParadas} paradas`;
   }catch(_){ /* se mantiene la línea recta */ }
 }
+
+/* mover un punto a mano: clic en el marcador -> clic en el lugar correcto */
+window.reubicarPedido = (id)=>{
+  if(!mapa) return;
+  mapa.closePopup();
+  toast('Ahora haz clic en el mapa en el punto EXACTO de este pedido');
+  mapa.once('click', async e=>{
+    const { error } = await sb.from('pedidos').update({lat:e.latlng.lat, lng:e.latlng.lng}).eq('id', id);
+    if(error){ toast('Error: '+error.message); return; }
+    const p = pedidos.find(x=>x.id===id);
+    if(p){ p.lat = e.latlng.lat; p.lng = e.latlng.lng; }
+    toast('📍 Punto reubicado ✓');
+    dibujarRuta();
+  });
+};
 
 /* ----- lista editable del orden ----- */
 function pintarListaOrden(activos){
@@ -1414,7 +1442,9 @@ window.corregirDireccion = async (id)=>{
       if(error){ toast('Error al guardar: '+error.message); }
       else {
         Object.assign(p, cambios); delete geoFallos[id];
-        toast(r.tipo==='calle' ? 'Ubicada a nivel de CALLE (número no mapeado) — punto aproximado' : 'Dirección ubicada y corregida ✓');
+        toast(r.tipo==='calle' ? 'Ubicada a nivel de CALLE (número no mapeado) — punto aproximado'
+          : r.tipo==='revisar' ? '⚠️ Solo se encontró LEJOS de Santiago — revisa la comuna o mueve el punto a mano'
+          : 'Dirección ubicada y corregida ✓');
         dibujarRuta();
       }
     } else {
@@ -1453,14 +1483,23 @@ async function buscarCoordenadas(dir, comuna){
   const sinNumero = expandida.replace(/\s+\d+\S*\s*$/,'').trim();
   const sinTituloNiNumero = sinTitulo.replace(/\s+\d+\S*\s*$/,'').trim();
 
+  // Preferimos SIEMPRE el resultado más cercano a Santiago (evita ambigüedades
+  // como "La Florida" de La Serena vs la comuna de Santiago)
+  const SCL = {lat:-33.45, lng:-70.66};
+  const elegirCercano = (cands)=>{
+    if(!cands.length) return null;
+    const conD = cands.map(c=>({...c, _d: distKm(c, SCL)})).sort((a,b)=>a._d-b._d);
+    const cerca = conD.find(c=>c._d <= 150);
+    return cerca ?? {...conD[0], lejos:true};
+  };
   const osm = async (params)=>{
-    const g = await (await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=cl&${params}`)).json();
-    return g?.[0] ? {lat:+g[0].lat, lng:+g[0].lon} : null;
+    const g = await (await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=5&countrycodes=cl&${params}`)).json();
+    return elegirCercano((g||[]).map(x=>({lat:+x.lat, lng:+x.lon})));
   };
   const photon = async (q)=>{
-    const g = await (await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=1&lat=-33.45&lon=-70.66`)).json();
-    const f = (g.features||[]).find(x=>x.properties?.countrycode==='CL');
-    return f ? {lat:f.geometry.coordinates[1], lng:f.geometry.coordinates[0]} : null;
+    const g = await (await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=5&lat=-33.45&lon=-70.66`)).json();
+    return elegirCercano((g.features||[]).filter(x=>x.properties?.countrycode==='CL')
+      .map(f=>({lat:f.geometry.coordinates[1], lng:f.geometry.coordinates[0]})));
   };
   const com = comuna||'';
   const intentos = [
@@ -1474,11 +1513,16 @@ async function buscarCoordenadas(dir, comuna){
     ...(sinNumero && sinNumero!==expandida ? [['calle', ()=>osm(`q=${encodeURIComponent(`${sinNumero}, ${com}, Chile`)}`)]] : []),
     ...(sinTituloNiNumero && sinTituloNiNumero!==sinNumero ? [['calle', ()=>osm(`q=${encodeURIComponent(`${sinTituloNiNumero}, ${com}, Chile`)}`)]] : []),
   ];
+  let lejano = null;
   for(const [tipo, intento] of intentos){
-    try{ const r = await intento(); if(r) return {...r, tipo}; }catch(_){}
+    try{
+      const r = await intento();
+      if(r && !r.lejos) return {...r, tipo};
+      if(r && !lejano) lejano = r; // lo guardamos por si nada cercano aparece
+    }catch(_){}
     await new Promise(res=>setTimeout(res, 350));
   }
-  return null;
+  return lejano ? {...lejano, tipo:'revisar'} : null;
 }
 
 /* geocodificar direcciones que faltan (1 por segundo, se guardan en la base) */

@@ -10,21 +10,16 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 
 const APP_ID = "7050388200486625";
+const PANEL = "https://edesgarceaux-dev.github.io/zas-reparto/";
 
+// Redirige de vuelta al panel, que muestra el resultado como notificación.
 const pagina = (titulo: string, cuerpo: string, ok: boolean) =>
-  new Response(
-    `<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">
-     <meta name="viewport" content="width=device-width,initial-scale=1">
-     <title>${titulo}</title></head>
-     <body style="font-family:system-ui;display:flex;align-items:center;justify-content:center;min-height:90vh;background:#f7f5f2">
-       <div style="background:#fff;border-radius:16px;padding:40px;max-width:420px;text-align:center;box-shadow:0 8px 30px rgba(0,0,0,.08)">
-         <div style="font-size:46px">${ok ? "✅" : "❌"}</div>
-         <h2 style="margin:12px 0 6px">${titulo}</h2>
-         <p style="color:#666">${cuerpo}</p>
-       </div>
-     </body></html>`,
-    { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" } },
-  );
+  new Response(null, {
+    status: 302,
+    headers: {
+      Location: `${PANEL}?ml=${ok ? "ok" : "error"}&msg=${encodeURIComponent(titulo + ". " + cuerpo)}`,
+    },
+  });
 
 Deno.serve(async (req) => {
   try {
