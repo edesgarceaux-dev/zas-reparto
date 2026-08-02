@@ -349,6 +349,15 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
   <label>Correo</label><input id="cEmail" type="email">
   <label>Dirección de retiro (bodega/tienda)</label><input id="cDir">
   <label>Comuna</label><input id="cComuna">
+  <div style="margin-top:10px">
+    <div style="display:flex;align-items:center;gap:8px">
+      <label style="margin:0">Ubicación exacta de la bodega</label>
+      <button class="btn btn-ghost" style="padding:3px 10px;font-size:12px" onclick="buscarBodegaEnMapa()">🔍 Buscar dirección</button>
+      <span id="cGeoInfo" style="font-size:11px;color:var(--muted)"></span>
+    </div>
+    <div id="mapaCli" style="height:220px;border-radius:8px;border:1px solid var(--grid);margin-top:6px"></div>
+    <div style="font-size:11px;color:var(--muted);margin-top:3px">Haz clic en el mapa (o arrastra el pin) para dejar el punto EXACTO — ese será el inicio de las rutas al elegir esta bodega como partida.</div>
+  </div>
   <label>Notas</label><textarea id="cNotas" rows="2"></textarea>
   <label>Integración</label>
   <select id="cInteg">
@@ -677,6 +686,7 @@ function pintarClientes(){
   }).join('') : '<tr><td colspan="6" class="empty">Aún no hay clientes. Crea el primero.</td></tr>';
 }
 
+let mapaCli = null, marcadorCli = null, cLat = null, cLng = null;
 function abrirModalCliente(c){
   clienteEditando = c ? c.id : null;
   $('cTitulo').textContent = c ? 'Editar cliente' : 'Nuevo cliente';
@@ -685,9 +695,54 @@ function abrirModalCliente(c){
   $('cDir').value = c?.direccion_retiro||''; $('cComuna').value = c?.comuna||'';
   $('cNotas').value = c?.notas||''; $('cInteg').value = c?.integracion||'manual';
   $('cErr').textContent='';
+  cLat = c?.lat ?? null; cLng = c?.lng ?? null;
   actualizarWebhookBox();
   $('mCliente').classList.add('on'); $('cNombre').focus();
+  setTimeout(iniciarMapaCliente, 150); // esperar a que el modal sea visible
 }
+function ponerPinCliente(lat, lng){
+  cLat = lat; cLng = lng;
+  $('cGeoInfo').textContent = '📌 punto fijado';
+  if(marcadorCli){ marcadorCli.setLatLng([lat,lng]); }
+  else {
+    marcadorCli = L.marker([lat,lng], {draggable:true}).addTo(mapaCli);
+    marcadorCli.on('dragend', ()=>{ const ll = marcadorCli.getLatLng(); cLat = ll.lat; cLng = ll.lng; $('cGeoInfo').textContent='📌 punto fijado'; });
+  }
+}
+function iniciarMapaCliente(){
+  if(typeof L === 'undefined'){ $('mapaCli').innerHTML = '<div class="empty" style="padding:20px">Mapa no disponible sin internet.</div>'; return; }
+  if(!mapaCli){
+    mapaCli = L.map('mapaCli').setView([-33.45, -70.66], 11);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution:'© OpenStreetMap', maxZoom:19}).addTo(mapaCli);
+    mapaCli.on('click', e=> ponerPinCliente(e.latlng.lat, e.latlng.lng));
+  }
+  setTimeout(()=>mapaCli.invalidateSize(), 100);
+  if(marcadorCli){ mapaCli.removeLayer(marcadorCli); marcadorCli = null; }
+  $('cGeoInfo').textContent = '';
+  if(cLat!=null && cLng!=null){
+    ponerPinCliente(cLat, cLng);
+    mapaCli.setView([cLat, cLng], 16);
+  } else if($('cDir').value.trim()){
+    buscarBodegaEnMapa(); // intenta ubicar la dirección escrita
+  }
+}
+window.buscarBodegaEnMapa = async ()=>{
+  const dir = $('cDir').value.trim();
+  if(!dir){ toast('Escribe primero la dirección de retiro'); return; }
+  $('cGeoInfo').textContent = 'buscando…';
+  try{
+    const q = encodeURIComponent(`${dir}, ${$('cComuna').value.trim()||''}, Chile`);
+    const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=cl&q=${q}`);
+    const g = await r.json();
+    if(g?.[0]){
+      ponerPinCliente(+g[0].lat, +g[0].lon);
+      mapaCli.setView([+g[0].lat, +g[0].lon], 16);
+      $('cGeoInfo').textContent = '📌 aproximado — ajusta el pin si no es exacto';
+    } else {
+      $('cGeoInfo').textContent = 'no se encontró — haz clic en el mapa para marcarla a mano';
+    }
+  }catch(_){ $('cGeoInfo').textContent = 'error de conexión'; }
+};
 function actualizarWebhookBox(){
   const esJump = $('cInteg').value==='jumpseller';
   $('cWebhook').style.display = (esJump && clienteEditando) ? 'block' : 'none';
@@ -727,11 +782,18 @@ $('cGuardar').onclick = async ()=>{
     telefono:$('cTel').value.trim()||null, email:$('cEmail').value.trim()||null,
     direccion_retiro:$('cDir').value.trim()||null, comuna:$('cComuna').value.trim()||null,
     notas:$('cNotas').value.trim()||null, integracion:$('cInteg').value,
+    lat:cLat, lng:cLng,
   };
-  const q = clienteEditando
+  let q = clienteEditando
     ? sb.from('clientes').update(datos).eq('id', clienteEditando)
     : sb.from('clientes').insert(datos);
-  const { error } = await q;
+  let { error } = await q;
+  if(error && /column .*(lat|lng)/i.test(error.message)){
+    delete datos.lat; delete datos.lng;   // aún no se ejecuta la migración de bodega
+    ({ error } = await (clienteEditando
+      ? sb.from('clientes').update(datos).eq('id', clienteEditando)
+      : sb.from('clientes').insert(datos)));
+  }
   if(error){ $('cErr').textContent=error.message; return; }
   cerrar('mCliente'); toast(clienteEditando?'Cliente actualizado':'Cliente creado');
   await cargarTodo();
@@ -983,6 +1045,13 @@ async function elegirPartida(){
   if(v.startsWith('cli-')){
     const c = clientes.find(x=>x.id===Number(v.slice(4)));
     if(!c) return;
+    if(c.lat!=null && c.lng!=null){
+      // punto exacto fijado por el admin en la ficha del cliente
+      puntoPartida = { lat:c.lat, lng:c.lng, nombre:'Bodega '+c.nombre };
+      localStorage.setItem('zas-partida', JSON.stringify(puntoPartida));
+      toast('Punto de partida: bodega de '+c.nombre+' (punto exacto)');
+      poblarSelectorPartida(); dibujarRuta(); return;
+    }
     $('geoEstado').textContent = 'Ubicando la bodega…';
     try{
       const q = encodeURIComponent(`${c.direccion_retiro}, ${c.comuna||''}, Chile`);
