@@ -163,6 +163,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         <button class="chip on" data-f="activos">Activos</button>
         <button class="chip" data-f="sin_asignar">Sin asignar</button>
         <button class="chip" data-f="hoy">Hoy</button>
+        <button class="chip" data-f="manana">Mañana</button>
         <button class="chip" data-f="todos">Todos</button>
         <span class="sp"></span>
         <input type="search" id="buscar" placeholder="Buscar cliente, dirección, código…">
@@ -359,6 +360,8 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     <div style="font-size:11px;color:var(--muted);margin-top:3px">Haz clic en el mapa (o arrastra el pin) para dejar el punto EXACTO — ese será el inicio de las rutas al elegir esta bodega como partida.</div>
   </div>
   <label>Notas</label><textarea id="cNotas" rows="2"></textarea>
+  <label>Hora de corte (pedidos pagados después de esta hora quedan para el día siguiente)</label>
+  <input id="cCorte" type="time">
   <label>Integración</label>
   <select id="cInteg">
     <option value="manual">Manual (sin tienda online)</option>
@@ -633,9 +636,11 @@ function pintarRendimiento(){
 function pintarPedidos(){
   const hoy = hoyStr(); const q = busq.toLowerCase();
   const lista = pedidos.filter(p=>{
+    const manana = new Date(Date.now()+86400000).toLocaleDateString('en-CA');
     const f = filtro==='activos' ? !FIN.includes(p.estado)
       : filtro==='sin_asignar' ? p.estado==='pendiente'
-      : filtro==='hoy' ? p.fecha_pedido===hoy : true;
+      : filtro==='hoy' ? p.fecha_pedido===hoy
+      : filtro==='manana' ? p.fecha_pedido===manana : true;
     const m = !q || [p.codigo,p.cliente_nombre,p.direccion,p.comuna,clienteDe(p.cliente_id)||''].join(' ').toLowerCase().includes(q);
     return f && m;
   });
@@ -677,7 +682,7 @@ function pintarClientes(){
       <td><b>${esc(c.nombre)}</b>${c.rut?`<br><span class="cod">${esc(c.rut)}</span>`:''}${c.activo?'':' <span class="cod">(inactivo)</span>'}</td>
       <td>${esc(c.telefono||'')}${c.email?`<br><span class="cod">${esc(c.email)}</span>`:''}</td>
       <td>${esc(c.direccion_retiro||'—')}${c.comuna?`, ${esc(c.comuna)}`:''}</td>
-      <td>${c.integracion==='jumpseller'?'🛒 Jumpseller':'✍️ Manual'}</td>
+      <td>${c.integracion==='jumpseller'?'🛒 Jumpseller':'✍️ Manual'}${c.hora_corte?`<br><span class="cod">corte ${esc(c.hora_corte.slice(0,5))}</span>`:''}</td>
       <td>${deHoy}</td>
       <td><button class="btn btn-ghost" onclick="editarCliente(${c.id})">Editar</button></td>
     </tr>`;
@@ -692,6 +697,7 @@ function abrirModalCliente(c){
   $('cTel').value = c?.telefono||''; $('cEmail').value = c?.email||'';
   $('cDir').value = c?.direccion_retiro||''; $('cComuna').value = c?.comuna||'';
   $('cNotas').value = c?.notas||''; $('cInteg').value = c?.integracion||'manual';
+  $('cCorte').value = c?.hora_corte ? c.hora_corte.slice(0,5) : '';
   $('cErr').textContent='';
   cLat = c?.lat ?? null; cLng = c?.lng ?? null;
   actualizarWebhookBox();
@@ -781,13 +787,14 @@ $('cGuardar').onclick = async ()=>{
     direccion_retiro:$('cDir').value.trim()||null, comuna:$('cComuna').value.trim()||null,
     notas:$('cNotas').value.trim()||null, integracion:$('cInteg').value,
     lat:cLat, lng:cLng,
+    hora_corte:$('cCorte').value||null,
   };
   let q = clienteEditando
     ? sb.from('clientes').update(datos).eq('id', clienteEditando)
     : sb.from('clientes').insert(datos);
   let { error } = await q;
-  if(error && /column .*(lat|lng)/i.test(error.message)){
-    delete datos.lat; delete datos.lng;   // aún no se ejecuta la migración de bodega
+  if(error && /column .*(lat|lng|hora_corte)/i.test(error.message)){
+    delete datos.lat; delete datos.lng; delete datos.hora_corte; // falta alguna migración
     ({ error } = await (clienteEditando
       ? sb.from('clientes').update(datos).eq('id', clienteEditando)
       : sb.from('clientes').insert(datos)));
@@ -904,6 +911,10 @@ window.verDetalle = async (id)=>{
       ${p.repartidor_id && !FIN.includes(p.estado)?`<button class="btn btn-ghost" onclick="desasignar(${p.id})">↩️ Quitar asignación</button>`:''}
       ${p.estado==='no_entregado'?`<button class="btn btn-ghost" onclick="reintentar(${p.id})">🔄 Reintentar</button>`:''}
       ${p.estado==='cancelado'?`<button class="btn btn-ghost" onclick="reintentar(${p.id})">♻️ Reactivar (pendiente)</button>`:''}
+      ${p.estado==='entregado'?`
+        <button class="btn btn-ghost" onclick="cambiarEstado(${p.id},'en_camino')">⏪ Volver a "En camino"</button>
+        <button class="btn btn-ghost" onclick="reintentar(${p.id})">♻️ Volver a pendiente (sin repartidor)</button>`:''}
+      ${p.estado==='no_entregado'?`<button class="btn btn-ghost" onclick="cambiarEstado(${p.id},'en_camino')">⏪ Volver a "En camino"</button>`:''}
     </div>
     ${prueba ? `
     <div style="margin-top:14px;padding:14px;background:#f2faf2;border:1px solid #cde8cd;border-radius:12px">
@@ -1096,11 +1107,16 @@ function poblarSelectorRuta(){
   if(valor) sel.value = valor;
 }
 
+const fechaLocalDe = ts => ts ? new Date(ts).toLocaleDateString('en-CA') : null;
 function pedidosDeRuta(){
   const rep = $('rutaRep').value;
   if(!rep) return pedidos.filter(p=>p.estado==='pendiente');
+  const hoy = hoyDia();
+  // activos + terminados HOY (por fecha real de término, no del pedido): se quedan en el mapa con su color
   return pedidos.filter(p=>p.repartidor_id===rep &&
-    (!FIN.includes(p.estado) || (p.fecha_pedido===hoyDia() && ['entregado','no_entregado'].includes(p.estado))));
+    (!FIN.includes(p.estado) ||
+      (['entregado','no_entregado'].includes(p.estado) &&
+        (fechaLocalDe(p.entregado_en)===hoy || fechaLocalDe(p.actualizado_en)===hoy || p.fecha_pedido===hoy))));
 }
 
 function ordenarParaRuta(lista){

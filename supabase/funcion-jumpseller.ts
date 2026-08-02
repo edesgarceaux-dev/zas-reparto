@@ -76,6 +76,22 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Hora de corte del cliente: lo pagado después del corte se despacha al día siguiente
+    try {
+      const { data: cli } = await supa.from("clientes")
+        .select("hora_corte").eq("id", clienteId).maybeSingle();
+      const corte = cli?.hora_corte as string | null; // ej "12:00:00"
+      if (corte && creadoEn && fechaPedido) {
+        const horaLocal = new Date(creadoEn).toLocaleTimeString("en-GB",
+          { timeZone: "America/Santiago", hour12: false }); // "13:45:12"
+        if (horaLocal > corte) {
+          const d2 = new Date(fechaPedido + "T12:00:00Z");
+          d2.setUTCDate(d2.getUTCDate() + 1);
+          fechaPedido = d2.toISOString().slice(0, 10);
+        }
+      }
+    } catch (_) { /* sin corte configurado */ }
+
     const { error } = await supa.from("pedidos").upsert({
       ...(creadoEn ? { creado_en: creadoEn } : {}),
       ...(fechaPedido ? { fecha_pedido: fechaPedido } : {}),
