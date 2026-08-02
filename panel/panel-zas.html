@@ -160,11 +160,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     <!-- Pedidos -->
     <section id="t-pedidos" style="display:none">
       <div class="bar">
-        <button class="chip on" data-f="activos">Activos</button>
-        <button class="chip" data-f="sin_asignar">Sin asignar</button>
-        <button class="chip" data-f="hoy">Hoy</button>
-        <button class="chip" data-f="manana">Mañana</button>
-        <button class="chip" data-f="todos">Todos</button>
+        <div id="chipsFiltros" style="display:flex;gap:8px;flex-wrap:wrap"></div>
         <span class="sp"></span>
         <input type="search" id="buscar" placeholder="Buscar cliente, dirección, código…">
         <button class="btn" id="nuevoPedido">+ Nuevo pedido</button>
@@ -641,14 +637,50 @@ function pintarRendimiento(){
   }).join('') : '<tr><td colspan="4" class="empty">Aún no hay repartidores.</td></tr>';
 }
 
+/* chips dinámicos por día de despacho, con conteo en vivo */
+function pintarChips(){
+  const cont = $('chipsFiltros'); if(!cont) return;
+  const hoy = hoyStr();
+  const conteoDia = {};
+  let atrasados = 0;
+  for(const p of pedidos){
+    if(FIN.includes(p.estado)) continue;
+    if(!p.fecha_pedido) continue;
+    if(p.fecha_pedido < hoy){ atrasados++; continue; }
+    conteoDia[p.fecha_pedido] = (conteoDia[p.fecha_pedido]||0)+1;
+  }
+  const DIAS = ['dom','lun','mar','mié','jue','vie','sáb'];
+  const man = new Date(Date.now()+86400000).toLocaleDateString('en-CA');
+  const etiqueta = f => {
+    const d = new Date(f+'T12:00:00');
+    const base = `${DIAS[d.getDay()]} ${d.getDate()}`;
+    if(f===hoy) return '📅 Hoy '+base;
+    if(f===man) return 'Mañana '+base;
+    return base.charAt(0).toUpperCase()+base.slice(1);
+  };
+  const fechas = Object.keys(conteoDia).sort().slice(0,7);
+  const chips = [
+    {k:'activos', t:'Activos'},
+    {k:'sin_asignar', t:'Sin asignar'},
+    ...(atrasados ? [{k:'anteriores', t:`⚠️ Atrasados (${atrasados})`}] : []),
+    ...fechas.map(f=>({k:'dia:'+f, t:`${etiqueta(f)} (${conteoDia[f]})`})),
+    {k:'todos', t:'Todos'},
+  ];
+  cont.innerHTML = chips.map(c=>
+    `<button class="chip ${filtro===c.k?'on':''}" data-k="${c.k}">${c.t}</button>`).join('');
+  cont.querySelectorAll('button').forEach(b=>
+    b.onclick = ()=>{ filtro = b.dataset.k; pintarPedidos(); });
+}
+
 function pintarPedidos(){
+  pintarChips();
   const hoy = hoyStr(); const q = busq.toLowerCase();
   const lista = pedidos.filter(p=>{
-    const manana = new Date(Date.now()+86400000).toLocaleDateString('en-CA');
     const f = filtro==='activos' ? !FIN.includes(p.estado)
       : filtro==='sin_asignar' ? p.estado==='pendiente'
-      : filtro==='hoy' ? p.fecha_pedido===hoy
-      : filtro==='manana' ? p.fecha_pedido===manana : true;
+      : filtro==='anteriores' ? (p.fecha_pedido < hoy && !FIN.includes(p.estado))
+      : filtro.startsWith('dia:') ? p.fecha_pedido===filtro.slice(4)
+      : true;
     const m = !q || [p.codigo,p.externo_id||'',p.cliente_nombre,p.direccion,p.comuna,clienteDe(p.cliente_id)||''].join(' ').toLowerCase().includes(q);
     return f && m;
   });
@@ -674,12 +706,15 @@ function pintarPedidos(){
 }
 
 function pintarReps(){
-  const reps = perfiles.filter(p=>p.rol==='repartidor');
+  // repartidores + administradores (los admin también pueden repartir)
+  const reps = [...perfiles].sort((a,b)=>
+    (a.rol===b.rol ? a.nombre.localeCompare(b.nombre) : a.rol==='repartidor' ? -1 : 1));
   $('tbodyReps').innerHTML = reps.length? reps.map(r=>`
     <tr style="cursor:default">
-      <td><b>${esc(r.nombre)}</b></td><td>${esc(r.telefono||'—')}</td>
+      <td><b>${esc(r.nombre)}</b>${r.rol==='admin'?' <span class="st" style="color:#2a78d6;font-size:11px">👑 admin</span>':''}</td>
+      <td>${esc(r.telefono||'—')}</td>
       <td>${r.activo?'✅ Activo':'⛔ Desactivado'}</td>
-      <td><input type="checkbox" class="switch" ${r.activo?'checked':''} onchange="toggleRep('${r.id}', this.checked)"></td>
+      <td>${r.id===adminUid?'<span class="cod">tú</span>':`<input type="checkbox" class="switch" ${r.activo?'checked':''} onchange="toggleRep('${r.id}', this.checked)">`}</td>
     </tr>`).join('') : '<tr><td colspan="4" class="empty">Aún no hay repartidores. Crea el primero.</td></tr>';
 }
 
@@ -915,6 +950,16 @@ window.verDetalle = async (id)=>{
       <h2>${esc(p.codigo||'#'+p.id)}</h2>${stChip(p.estado)}
     </div>
     <div style="margin:12px 0">${filas}</div>
+    <div style="margin:4px 0 12px;padding:12px;background:#f7f6f2;border-radius:10px">
+      <b style="font-size:13px">✏️ Corregir dirección</b>
+      <span class="cod" style="margin-left:6px">${p.lat!=null?'ubicada en el mapa ✓':'⚠️ sin ubicar'}</span>
+      <div class="cols" style="margin-top:6px">
+        <div><input id="dDir" value="${esc(p.direccion)}" placeholder="Dirección"></div>
+        <div><input id="dCom" value="${esc(p.comuna||'')}" placeholder="Comuna"></div>
+      </div>
+      <button class="btn btn-ghost" style="margin-top:8px" onclick="corregirDireccionPedido(${p.id})">Guardar y reubicar en el mapa</button>
+      <span id="dDirEstado" style="font-size:12px;margin-left:8px"></span>
+    </div>
     <label>Asignar / reasignar a</label>
     <div style="display:flex;gap:8px">
       <select id="dRep"><option value="">— elegir repartidor —</option>
@@ -954,6 +999,23 @@ window.verDetalle = async (id)=>{
     <div class="foot"><button class="btn btn-ghost" onclick="cerrar('mDet')">Cerrar</button></div>`;
   $('mDet').classList.add('on');
 };
+window.corregirDireccionPedido = async (id)=>{
+  const dir = $('dDir').value.trim(), com = $('dCom').value.trim();
+  if(!dir){ $('dDirEstado').innerHTML='<span style="color:#d03b3b">Escribe la dirección</span>'; return; }
+  $('dDirEstado').textContent = 'Buscando ubicación…';
+  let coords = null;
+  try{ coords = await buscarCoordenadas(dir, com); }catch(_){}
+  const cambios = { direccion:dir, comuna:com||null, lat:coords?.lat??null, lng:coords?.lng??null };
+  const { error } = await sb.from('pedidos').update(cambios).eq('id', id);
+  if(error){ $('dDirEstado').innerHTML=`<span style="color:#d03b3b">${error.message}</span>`; return; }
+  const p = pedidos.find(x=>x.id===id); if(p) Object.assign(p, cambios);
+  $('dDirEstado').innerHTML = coords
+    ? '<span style="color:#006300">✓ Dirección corregida y ubicada en el mapa</span>'
+    : '<span style="color:#b45b00">Guardada, pero no se encontró en el mapa — corrígela en la pestaña Mapa o revisa la escritura</span>';
+  toast('Dirección actualizada');
+  pintarPedidos();
+};
+
 window.asignar = async (id)=>{
   const rep = $('dRep').value; if(!rep){ toast('Elige un repartidor'); return; }
   const { error } = await sb.from('pedidos').update({repartidor_id:rep, estado:'asignado'}).eq('id',id);
@@ -983,11 +1045,7 @@ $('rGuardar').onclick = async ()=>{
   setTimeout(cargarTodo, 1200);
 };
 
-/* filtros y búsqueda */
-document.querySelectorAll('.chip').forEach(ch=> ch.onclick = ()=>{
-  document.querySelectorAll('.chip').forEach(x=>x.classList.remove('on'));
-  ch.classList.add('on'); filtro = ch.dataset.f; pintarPedidos();
-});
+/* búsqueda (los chips de filtro se generan dinámicamente en pintarChips) */
 $('buscar').oninput = e=>{ busq = e.target.value; pintarPedidos(); };
 
 /* tabs */
