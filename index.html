@@ -170,6 +170,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         <select id="masivaRep" style="width:auto;padding:6px 8px"></select>
         <button class="btn" id="masivaAsignar">Asignar</button>
         <button class="btn btn-ghost" style="color:#fff;border-color:#666" id="masivaDesasignar">Quitar asignación</button>
+        <button class="btn btn-ghost" style="color:#ff9d9d;border-color:#844" id="masivaCancelar">🚫 Cancelar</button>
         <span class="sp" style="flex:1"></span>
         <button class="btn btn-ghost" style="color:#fff;border-color:#666" onclick="limpiarSeleccion()">✕ Limpiar</button>
       </div>
@@ -646,7 +647,12 @@ function pintarChips(){
   for(const p of pedidos){
     if(FIN.includes(p.estado)) continue;
     if(!p.fecha_pedido) continue;
-    if(p.fecha_pedido < hoy){ atrasados++; continue; }
+    if(p.fecha_pedido < hoy){
+      // atrasado REAL: nos lo asignaron y no se entregó.
+      // Los antiguos sin asignar no son atrasados (no los llevó ZAS).
+      if(p.repartidor_id) atrasados++;
+      continue;
+    }
     conteoDia[p.fecha_pedido] = (conteoDia[p.fecha_pedido]||0)+1;
   }
   const DIAS = ['dom','lun','mar','mié','jue','vie','sáb'];
@@ -677,8 +683,8 @@ function pintarPedidos(){
   const hoy = hoyStr(); const q = busq.toLowerCase();
   const lista = pedidos.filter(p=>{
     const f = filtro==='activos' ? !FIN.includes(p.estado)
-      : filtro==='sin_asignar' ? p.estado==='pendiente'
-      : filtro==='anteriores' ? (p.fecha_pedido < hoy && !FIN.includes(p.estado))
+      : filtro==='sin_asignar' ? (p.estado==='pendiente' && p.fecha_pedido >= hoy)
+      : filtro==='anteriores' ? (p.fecha_pedido < hoy && !FIN.includes(p.estado) && p.repartidor_id)
       : filtro.startsWith('dia:') ? p.fecha_pedido===filtro.slice(4)
       : true;
     const m = !q || [p.codigo,p.externo_id||'',p.cliente_nombre,p.direccion,p.comuna,clienteDe(p.cliente_id)||''].join(' ').toLowerCase().includes(q);
@@ -898,6 +904,18 @@ $('masivaDesasignar').onclick = async ()=>{
   }
   if(error){ toast('Error: '+error.message); return; }
   toast('Asignación quitada — quedaron pendientes');
+  limpiarSeleccion(); cargarTodo();
+};
+
+$('masivaCancelar').onclick = async ()=>{
+  const ids = [...seleccion];
+  if(!confirm(`¿Cancelar ${ids.length} pedido(s)? Útil para limpiar pedidos antiguos que no repartió ZAS. Se pueden reactivar uno a uno desde el detalle.`)) return;
+  const { error } = await sb.from('pedidos')
+    .update({estado:'cancelado'})
+    .in('id', ids)
+    .not('estado','eq','entregado');
+  if(error){ toast('Error: '+error.message); return; }
+  toast(ids.length+' pedidos cancelados');
   limpiarSeleccion(); cargarTodo();
 };
 
@@ -1183,7 +1201,7 @@ function poblarSelectorRuta(){
 const fechaLocalDe = ts => ts ? new Date(ts).toLocaleDateString('en-CA') : null;
 function pedidosDeRuta(){
   const rep = $('rutaRep').value;
-  if(!rep) return pedidos.filter(p=>p.estado==='pendiente');
+  if(!rep) return pedidos.filter(p=>p.estado==='pendiente' && p.fecha_pedido >= hoyDia());
   const hoy = hoyDia();
   // activos + terminados HOY (por fecha real de término, no del pedido): se quedan en el mapa con su color
   return pedidos.filter(p=>p.repartidor_id===rep &&
