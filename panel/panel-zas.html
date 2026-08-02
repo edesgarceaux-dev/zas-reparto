@@ -202,7 +202,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         <button class="btn" id="nuevoRep">+ Nuevo repartidor</button>
       </div>
       <div class="tbl"><table>
-        <thead><tr><th>Nombre</th><th>Teléfono</th><th>Estado</th><th>Activo</th></tr></thead>
+        <thead><tr><th>Nombre</th><th>Teléfono</th><th>Dirección</th><th>Correo</th><th>Estado</th><th>Activo</th><th></th></tr></thead>
         <tbody id="tbodyReps"></tbody>
       </table></div>
     </section>
@@ -452,10 +452,38 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
   <label>Nombre *</label><input id="rNombre">
   <label>Correo *</label><input id="rEmail" type="email">
   <label>Contraseña * (mínimo 6)</label><input id="rPass">
+  <div class="cols">
+    <div><label>Teléfono</label><input id="rTel"></div>
+    <div><label>Dirección del domicilio</label><input id="rDir"></div>
+  </div>
   <div class="err" id="rErr"></div>
   <div class="foot">
     <button class="btn btn-ghost" onclick="cerrar('mRep')">Cancelar</button>
     <button class="btn" id="rGuardar">Crear cuenta</button>
+  </div>
+</div></div>
+
+<!-- modal editar repartidor -->
+<div class="veil" id="mEditRep"><div class="modal">
+  <h2>Editar repartidor</h2>
+  <label>Nombre *</label><input id="eNombre">
+  <div class="cols">
+    <div><label>Teléfono</label><input id="eTel"></div>
+    <div><label>Correo de contacto</label><input id="eCorreo" type="email"></div>
+  </div>
+  <label>Dirección del domicilio</label><input id="eDir">
+  <label>Comuna de preferencia (opcional)</label><input id="eComuna" placeholder="Ej: La Florida">
+  <p style="color:var(--muted);font-size:11.5px;margin-top:4px">
+    ⭐ Si la defines, "🤖 Repartir auto" intentará darle el sector de esa comuna.
+  </p>
+  <p style="color:var(--muted);font-size:11.5px;margin-top:8px">
+    ℹ️ El correo con el que <b>inicia sesión</b> no se cambia desde aquí (es el de la cuenta);
+    este correo es solo de contacto.
+  </p>
+  <div class="err" id="eErr"></div>
+  <div class="foot">
+    <button class="btn btn-ghost" onclick="cerrar('mEditRep')">Cancelar</button>
+    <button class="btn" id="eGuardar">Guardar</button>
   </div>
 </div></div>
 
@@ -808,53 +836,169 @@ window.abrirAutoRepartir = ()=>{
     .sort((a,b)=> a.rol===b.rol ? a.nombre.localeCompare(b.nombre) : a.rol==='repartidor'?-1:1);
   $('autoReps').innerHTML = reps.map(r=>`
     <label style="display:flex;align-items:center;gap:8px;margin:0;padding:7px 10px;border:1px solid var(--grid);border-radius:8px;cursor:pointer;font-size:13px;color:var(--ink)">
-      <input type="checkbox" value="${r.id}" style="width:auto">${esc(r.nombre)}${r.rol==='admin'?' <span class="cod">(admin)</span>':''}
+      <input type="checkbox" value="${r.id}" style="width:auto">
+      <span style="flex:1">${esc(r.nombre)}${r.rol==='admin'?' <span class="cod">(admin)</span>':''}${r.comuna_preferida?` <span class="cod">⭐ ${esc(r.comuna_preferida)}</span>`:''}</span>
+      <input type="number" min="1" placeholder="auto" data-cupo="${r.id}" title="Cantidad de pedidos para este repartidor (vacío = repartir parejo)"
+        style="width:74px;padding:5px 8px;font-size:12.5px" onclick="event.preventDefault();event.stopPropagation()">
     </label>`).join('');
   $('autoErr').textContent='';
   $('mAuto').classList.add('on');
 };
 $('autoGo').onclick = async ()=>{
-  const elegidos = [...document.querySelectorAll('#autoReps input:checked')].map(i=>i.value);
+  const marcados = [...document.querySelectorAll('#autoReps input[type="checkbox"]:checked')];
+  const elegidos = marcados.map(i=>i.value);
   if(!elegidos.length){ $('autoErr').textContent='Marca al menos un repartidor.'; return; }
+  // cupos: número escrito = fijo; vacío = "auto" (se reparte parejo lo que sobre)
+  const total = autoLista.length;
+  const cuposFijos = elegidos.map(id=>{
+    const v = document.querySelector(`#autoReps input[data-cupo="${id}"]`)?.value;
+    return v ? Math.max(1, Number(v)) : null;
+  });
+  const sumaFija = cuposFijos.reduce((s,c)=>s+(c||0),0);
+  const autos = cuposFijos.filter(c=>c===null).length;
+  if(sumaFija > total){
+    $('autoErr').textContent = `Las cantidades suman ${sumaFija}, pero solo hay ${total} pedidos.`;
+    return;
+  }
+  const sobrante = total - sumaFija;
+  if(autos === 0 && sobrante > 0){
+    if(!confirm(`Las cantidades suman ${sumaFija} de ${total}: quedarán ${sobrante} pedidos SIN asignar (los más lejanos de cada sector). ¿Continuar?`)) return;
+  }
+  const cupos = cuposFijos.map(c=>{
+    if(c!==null) return c;
+    const base = Math.floor(sobrante/autos), extra = sobrante%autos;
+    return base; // extras se agregan abajo
+  });
+  // repartir el resto de la división entre los "auto"
+  let extras = autos ? sobrante - cupos.reduce((s,c,i)=>s+(cuposFijos[i]===null?c:0),0) : 0;
+  for(let i=0;i<cupos.length && extras>0;i++){ if(cuposFijos[i]===null){ cupos[i]++; extras--; } }
   $('autoGo').disabled = true;
   try{
-    const grupos = repartirEnSectores(autoLista, elegidos.length);
+    const prefs = elegidos.map(id=>
+      (perfiles.find(x=>x.id===id)||{}).comuna_preferida || null);
+    const { grupos, fuera } = repartirEnSectores(autoLista, cupos, prefs);
     const resumen = [];
     for(let g=0; g<elegidos.length; g++){
+      if(!grupos[g].length) continue;
       const ids = grupos[g].map(p=>p.id);
-      if(!ids.length) continue;
       const { error } = await sb.from('pedidos')
         .update({repartidor_id: elegidos[g], estado:'asignado'}).in('id', ids);
       if(error) throw new Error(error.message);
+      // orden preliminar de ruta por cercanía (después se afina con OSRM en Mapa)
+      const ordenados = ordenarGrupoPorCercania(grupos[g]);
+      for(let k=0; k<ordenados.length; k++){
+        await sb.from('pedidos').update({ruta_orden: k+1}).eq('id', ordenados[k].id);
+      }
       resumen.push(`${nombreDe(elegidos[g])} (${ids.length})`);
     }
     cerrar('mAuto'); limpiarSeleccion();
-    toast('🤖 Repartidos: '+resumen.join(' · ')+' — ahora optimiza cada ruta en Mapa');
+    toast('🤖 Repartidos por sectores: '+resumen.join(' · ')
+      + (fuera.length ? ` · ${fuera.length} quedaron sin asignar` : '')
+      + ' — cada ruta ya viene ordenada; afínala con ✨ Optimizar en Mapa');
     cargarTodo();
   }catch(e){ $('autoErr').textContent = 'Error: '+e.message; }
   finally{ $('autoGo').disabled = false; }
 };
-function repartirEnSectores(lista, n){
-  // sectores por ángulo alrededor del centro de los pedidos ("torta"), tamaños parejos:
-  // cada repartidor recibe una zona contigua de la ciudad
+
+/* Agrupación por sectores COMPACTOS con cupos y comuna de preferencia:
+   1. Primero los repartidores CON comuna de preferencia: su semilla es un
+      pedido de esa comuna (si hay).
+   2. Los demás parten con el pedido más lejano del centro aún libre
+      (se cubren los bordes de la ciudad, que es lo que más encarece).
+   3. Cada grupo crece agregando siempre el pedido más cercano a su centro
+      móvil hasta llenar su cupo → zonas contiguas y acotadas, sin cruzarse. */
+function repartirEnSectores(lista, cupos, prefs){
+  const n = cupos.length;
+  prefs = prefs || Array(n).fill(null);
   const con = lista.filter(p=>p.lat!=null && p.lng!=null);
   const sin = lista.filter(p=>p.lat==null || p.lng==null);
   const grupos = Array.from({length:n}, ()=>[]);
-  if(con.length){
-    const cx = con.reduce((s,p)=>s+p.lat,0)/con.length;
-    const cy = con.reduce((s,p)=>s+p.lng,0)/con.length;
-    const orden = [...con].sort((a,b)=>
-      Math.atan2(a.lat-cx, a.lng-cy) - Math.atan2(b.lat-cx, b.lng-cy));
-    const base = Math.floor(orden.length/n), extra = orden.length % n;
-    let i = 0;
-    for(let g=0; g<n; g++){
-      const cuantos = base + (g<extra?1:0);
-      grupos[g].push(...orden.slice(i, i+cuantos));
-      i += cuantos;
+  let restantes = [...con];
+  const centro = con.length
+    ? { lat: con.reduce((s,p)=>s+p.lat,0)/con.length, lng: con.reduce((s,p)=>s+p.lng,0)/con.length }
+    : null;
+  const norm = s => (s||'').toString().toLowerCase().trim();
+  // con preferencia primero (para que tomen su comuna), luego por cupo mayor
+  const ordenGrupos = cupos.map((c,i)=>({c, i, pref: norm(prefs[i])}))
+    .sort((a,b)=> (b.pref?1:0)-(a.pref?1:0) || b.c-a.c);
+  for(const {c, i, pref} of ordenGrupos){
+    if(!restantes.length || c<=0) continue;
+    let semilla = null;
+    if(pref){
+      // semilla dentro de su comuna preferida (si queda alguno)
+      const deComuna = restantes.filter(p=>norm(p.comuna).includes(pref) || pref.includes(norm(p.comuna)||'~'));
+      if(deComuna.length) semilla = deComuna[0];
+    }
+    if(!semilla){
+      semilla = restantes[0];
+      for(const p of restantes){
+        if(distKm(p, centro) > distKm(semilla, centro)) semilla = p;
+      }
+    }
+    const grupo = [semilla];
+    restantes = restantes.filter(p=>p!==semilla);
+    // primero llenar con el resto de su comuna preferida (lo más cercano primero)
+    while(grupo.length < c && restantes.length){
+      const gx = grupo.reduce((s,p)=>s+p.lat,0)/grupo.length;
+      const gy = grupo.reduce((s,p)=>s+p.lng,0)/grupo.length;
+      let mejor = -1, mejorD = Infinity;
+      if(pref){
+        for(let k=0;k<restantes.length;k++){
+          if(!norm(restantes[k].comuna).includes(pref)) continue;
+          const d = distKm(restantes[k], {lat:gx, lng:gy});
+          if(d < mejorD){ mejorD = d; mejor = k; }
+        }
+      }
+      if(mejor < 0){ // ya no quedan de su comuna: seguir por cercanía normal
+        mejorD = Infinity;
+        for(let k=0;k<restantes.length;k++){
+          const d = distKm(restantes[k], {lat:gx, lng:gy});
+          if(d < mejorD){ mejorD = d; mejor = k; }
+        }
+      }
+      grupo.push(restantes.splice(mejor,1)[0]);
+    }
+    grupos[i] = grupo;
+  }
+  // pedidos sin ubicar: a los grupos que aún tienen espacio (o parejo si están llenos)
+  let gi = 0;
+  for(const p of sin){
+    const ix = grupos.findIndex((g,j)=>g.length < cupos[j]);
+    if(ix >= 0) grupos[ix].push(p);
+    else { grupos[gi % n].push(p); gi++; }
+  }
+  return { grupos, fuera: restantes };
+}
+
+/* Orden preliminar dentro del sector: vecino más cercano desde la bodega + 2-opt */
+function ordenarGrupoPorCercania(grupo){
+  const conG = grupo.filter(p=>p.lat!=null && p.lng!=null);
+  const sinG = grupo.filter(p=>p.lat==null || p.lng==null);
+  if(conG.length < 2) return [...conG, ...sinG];
+  const bodega = clientes.find(c=>c.lat!=null && c.lng!=null);
+  const inicio = bodega ? {lat:bodega.lat, lng:bodega.lng}
+    : { lat: conG.reduce((s,p)=>s+p.lat,0)/conG.length, lng: conG.reduce((s,p)=>s+p.lng,0)/conG.length };
+  let ruta = [], pend = [...conG], actual = inicio;
+  while(pend.length){
+    let m = 0;
+    for(let i=1;i<pend.length;i++) if(distKm(actual,pend[i]) < distKm(actual,pend[m])) m = i;
+    const s = pend.splice(m,1)[0];
+    ruta.push(s); actual = s;
+  }
+  if(conG.length <= 80){ // 2-opt solo en grupos manejables (deshace cruces)
+    const kmDe = r=>{ let km=distKm(inicio,r[0]); for(let i=1;i<r.length;i++) km+=distKm(r[i-1],r[i]); return km; };
+    let mejoro = true, v = 0;
+    while(mejoro && v++ < 15){
+      mejoro = false;
+      for(let i=0;i<ruta.length-1;i++){
+        for(let j=i+1;j<ruta.length;j++){
+          const cand = [...ruta.slice(0,i), ...ruta.slice(i,j+1).reverse(), ...ruta.slice(j+1)];
+          if(kmDe(cand) < kmDe(ruta) - 0.001){ ruta = cand; mejoro = true; }
+        }
+      }
     }
   }
-  sin.forEach((p,i)=> grupos[i%n].push(p));
-  return grupos;
+  return [...ruta, ...sinG];
 }
 
 /* ---------- ALERTAS OPERATIVAS ---------- */
@@ -1112,9 +1256,12 @@ function pintarReps(){
     <tr style="cursor:default">
       <td><b>${esc(r.nombre)}</b>${r.rol==='admin'?' <span class="st" style="color:#2a78d6;font-size:11px">👑 admin</span>':''}</td>
       <td>${esc(r.telefono||'—')}</td>
+      <td>${esc(r.direccion||'—')}${r.comuna_preferida?`<br><span class="cod">⭐ prefiere ${esc(r.comuna_preferida)}</span>`:''}</td>
+      <td>${esc(r.correo||'—')}</td>
       <td>${r.activo?'✅ Activo':'⛔ Desactivado'}</td>
       <td>${r.id===adminUid?'<span class="cod">tú</span>':`<input type="checkbox" class="switch" ${r.activo?'checked':''} onchange="toggleRep('${r.id}', this.checked)">`}</td>
-    </tr>`).join('') : '<tr><td colspan="4" class="empty">Aún no hay repartidores. Crea el primero.</td></tr>';
+      <td><button class="btn btn-ghost" onclick="editarRep('${r.id}')">Editar</button></td>
+    </tr>`).join('') : '<tr><td colspan="7" class="empty">Aún no hay repartidores. Crea el primero.</td></tr>';
 }
 
 function pintarClientes(){
@@ -1512,15 +1659,59 @@ window.desasignar = async (id)=>{
   if(error) toast('Error: '+error.message); else { cerrar('mDet'); toast('Asignación quitada'); }
 };
 
-$('nuevoRep').onclick = ()=>{ ['rNombre','rEmail','rPass'].forEach(i=>$(i).value=''); $('rErr').textContent=''; $('mRep').classList.add('on'); $('rNombre').focus(); };
+$('nuevoRep').onclick = ()=>{ ['rNombre','rEmail','rPass','rTel','rDir'].forEach(i=>$(i).value=''); $('rErr').textContent=''; $('mRep').classList.add('on'); $('rNombre').focus(); };
 $('rGuardar').onclick = async ()=>{
   const n=$('rNombre').value.trim(), e=$('rEmail').value.trim(), c=$('rPass').value;
   if(!n||!e||c.length<6){ $('rErr').textContent='Completa nombre, correo y contraseña de mínimo 6 caracteres.'; return; }
   const aux = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {auth:{storageKey:'zas-aux', persistSession:false, autoRefreshToken:false}});
-  const { error } = await aux.auth.signUp({ email:e, password:c, options:{ data:{ nombre:n } } });
+  const { data, error } = await aux.auth.signUp({ email:e, password:c, options:{ data:{ nombre:n } } });
   if(error){ $('rErr').textContent=error.message; return; }
+  // completar la ficha (teléfono, dirección, correo de contacto)
+  if(data?.user?.id){
+    await new Promise(r=>setTimeout(r, 800));
+    const extra = { telefono:$('rTel').value.trim()||null, correo:e };
+    if($('rDir').value.trim()) extra.direccion = $('rDir').value.trim();
+    let { error: e2 } = await sb.from('perfiles').update(extra).eq('id', data.user.id);
+    if(e2 && /column/i.test(e2.message)){
+      await sb.from('perfiles').update({ telefono: extra.telefono }).eq('id', data.user.id);
+    }
+  }
   cerrar('mRep'); toast('Cuenta de '+n+' creada');
   setTimeout(cargarTodo, 1200);
+};
+
+/* editar ficha del repartidor */
+let repEditando = null;
+window.editarRep = (id)=>{
+  const r = perfiles.find(x=>x.id===id); if(!r) return;
+  repEditando = id;
+  $('eNombre').value = r.nombre||''; $('eTel').value = r.telefono||'';
+  $('eDir').value = r.direccion||''; $('eCorreo').value = r.correo||'';
+  $('eComuna').value = r.comuna_preferida||'';
+  $('eErr').textContent='';
+  $('mEditRep').classList.add('on'); $('eNombre').focus();
+};
+$('eGuardar').onclick = async ()=>{
+  if(!$('eNombre').value.trim()){ $('eErr').textContent='El nombre es obligatorio.'; return; }
+  const datos = {
+    nombre:$('eNombre').value.trim(), telefono:$('eTel').value.trim()||null,
+    direccion:$('eDir').value.trim()||null, correo:$('eCorreo').value.trim()||null,
+    comuna_preferida:$('eComuna').value.trim()||null,
+  };
+  let { error } = await sb.from('perfiles').update(datos).eq('id', repEditando);
+  if(error && /column/i.test(error.message)){
+    // falta la migración de perfiles: guardar al menos nombre y teléfono
+    ({ error } = await sb.from('perfiles')
+      .update({nombre:datos.nombre, telefono:datos.telefono}).eq('id', repEditando));
+    if(!error){
+      cerrar('mEditRep');
+      toast('⚠️ Guardado nombre y teléfono — ejecuta migracion-perfiles.sql para dirección y correo');
+      cargarTodo(); return;
+    }
+  }
+  if(error){ $('eErr').textContent=error.message; return; }
+  cerrar('mEditRep'); toast('Repartidor actualizado ✓');
+  cargarTodo();
 };
 
 /* búsqueda (los chips de filtro se generan dinámicamente en pintarChips) */
