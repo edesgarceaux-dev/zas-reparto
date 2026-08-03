@@ -810,7 +810,9 @@ window.verDetalleEmp = async (id)=>{
   const filas = [
     ['Cliente',p.cliente_nombre],['Teléfono',p.cliente_telefono],
     ['Dirección',p.direccion],['Comuna',p.comuna],['Referencia',p.referencia],
-    ['Cód. envío',p.externo_id?'#'+p.externo_id:null],
+    ['N° de orden',p.externo_id?'#'+p.externo_id:null],
+    ['N° de envío (QR etiqueta Flex)', p.origen==='mercadolibre'
+        ? (p.envio_id ? p.envio_id : '⚠️ falta') : null],
     ['Fecha de despacho',p.fecha_pedido],
     ['Motivo no entrega',p.motivo_no_entrega],['Nota de entrega',p.nota_entrega],
   ].filter(([,v])=>v).map(([k,v])=>`<div class="row"><b>${k}</b><span>${esc(v)}</span></div>`).join('');
@@ -1807,7 +1809,10 @@ window.verDetalle = async (id)=>{
     ['Empresa', p.cliente_id? (clienteDe(p.cliente_id)||'')+(p.origen==='jumpseller'?' (⚡ pedido automático Jumpseller'+(p.externo_id?' #'+p.externo_id:'')+')':'') : null],
     ['Cliente',p.cliente_nombre],['Teléfono',p.cliente_telefono],
     ['Dirección',p.direccion],['Comuna',p.comuna],['Referencia',p.referencia],
-    ['Cód. envío',p.externo_id?'#'+p.externo_id:null],
+    ['N° de orden',p.externo_id?'#'+p.externo_id:null],
+    ['N° de envío (QR etiqueta Flex)', p.origen==='mercadolibre'
+        ? (p.envio_id ? p.envio_id : '⚠️ falta — la app no puede escanear esta etiqueta')
+        : null],
     ['Repartidor',p.repartidor_id?nombreDe(p.repartidor_id):'Sin asignar'],
     ['Motivo no entrega',p.motivo_no_entrega],['Nota entrega',p.nota_entrega],
   ].filter(([,v])=>v).map(([k,v])=>`<div class="row"><b>${k}</b><span>${esc(v)}</span></div>`).join('');
