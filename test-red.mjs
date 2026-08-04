@@ -15,7 +15,7 @@ const r = await page.evaluate(async () => {
   const $ = id => document.getElementById(id);
   const enMin = m => new Date(Date.now() + m*60000).toISOString();
 
-  window.__rpc = []; window.__upd = []; window.__del = [];
+  window.__rpc = []; window.__upd = []; window.__del = []; window.__ins = []; window.__insErr = null;
   eval(`
     sb.rpc = async (n,a) => {
       window.__rpc.push({n,a});
@@ -34,6 +34,7 @@ const r = await page.evaluate(async () => {
         then:(f)=>Promise.resolve({data:window.__sel(t),error:null}).then(f) }; return o; },
       update: (v) => { const o = { eq: ()=>o, then:(f)=>{ window.__upd.push({t,v}); return Promise.resolve({error:null}).then(f); } }; return o; },
       delete: () => { const o = { eq: ()=>o, then:(f)=>{ window.__del.push({t}); return Promise.resolve({error:null}).then(f); } }; return o; },
+      insert: (v) => ({ then:(f)=>{ window.__ins.push({t,v}); return Promise.resolve(window.__insErr||{error:null}).then(f); } }),
     });
   `);
   window.__sel = () => [];
@@ -222,6 +223,36 @@ const r = await page.evaluate(async () => {
   eval("HAY_POOL = false; poolPedidos = []; pedidos = [{id:5,codigo:'ZAS-5',estado:'pendiente',cliente_nombre:'v',direccion:'x',fecha_pedido:'2026-08-03',creado_en:'2026-08-03T09:00:00Z'}];");
   eval("repartirPedidos([{id:7,codigo:'ZAS-7',estado:'pendiente'}])");
   ok('14. sin la migración, ningún pedido se va al pool por error', eval("pedidos.length===1 && poolPedidos.length===0"));
+
+  // ---------- 15. RUT que ya está en la red ----------
+  eval("clienteEditando = null; HAY_POOL = true;");
+  document.getElementById('cNombre').value = 'Distribuidora Pepitos';
+  document.getElementById('cRut').value    = '76.111.222-3';
+  window.__insErr = { error:{ message:'duplicate key value violates unique constraint "idx_clientes_rut_unico"' } };
+  await document.getElementById('cGuardar').onclick();
+  const ce = document.getElementById('cErr');
+  ok('15. si el RUT ya está en la red, no muestra el error de Postgres',
+      !/duplicate key|idx_clientes_rut_unico/.test(ce.textContent), ce.textContent.slice(0,120));
+  ok('15b. dice de quién es ese RUT', /Panader/.test(ce.textContent), ce.textContent.slice(0,140));
+  ok('15c. explica que no hay que crearlo de nuevo', /No hay que crearlo de nuevo/.test(ce.textContent));
+  ok('15d. ofrece el botón para pedírselo', /Pedirle trabajar con él/.test(ce.innerHTML));
+
+  await window.pedirClienteDesdeFicha(7);
+  ok('15e. el botón manda la solicitud', window.__rpc.filter(r=>r.n==='solicitar_cliente').length >= 2);
+  ok('15f. y confirma que ahora decide el cliente', /tiene que aceptarla/.test(ce.textContent), ce.textContent);
+
+  window.__insErr = { error:{ message:'duplicate key value violates unique constraint "idx_clientes_rut_unico"' } };
+  document.getElementById('cRut').value = '77.777.777-7';   // ese ya es tuyo
+  await document.getElementById('cGuardar').onclick();
+  ok('15g. si ya es cliente tuyo, lo dice sin drama', /ya está en tu lista/.test(ce.textContent), ce.textContent.slice(0,120));
+
+  window.__insErr = { error:{ message:'duplicate key value violates unique constraint "idx_clientes_rut_unico"' } };
+  document.getElementById('cRut').value = '99.999.999-9';   // no está en la red
+  await document.getElementById('cGuardar').onclick();
+  ok('15h. si el RUT choca pero no aparece, avisa que lo revise',
+      /Ya hay otro cliente con ese RUT/.test(ce.textContent), ce.textContent.slice(0,120));
+
+  window.__insErr = null;
 
   return out;
 });

@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ZAS Reparto — Panel de Control</title>
-<!-- panel v1.33 -->
+<!-- panel v1.34 -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -710,7 +710,7 @@ const EST = {
 };
 const FIN = ['entregado','cancelado','no_entregado'];
 let pedidos = [], perfiles = [], clientes = [], filtro = 'activos', busq = '', clienteEditando = null;
-/* ---- POOL / RED DE EMPRESAS DE REPARTO (v1.33) ---- */
+/* ---- POOL / RED DE EMPRESAS DE REPARTO (v1.34) ---- */
 let empresas = [], habilitaciones = [], poolPedidos = [];
 let miEmpresa = null, soySuper = false, HAY_POOL = false;
 /* v1.33: reglas de reparto del cliente y frenos anti-acaparamiento */
@@ -2249,6 +2249,7 @@ function pintarClientes(){
 let mapaCli = null, marcadorCli = null, cLat = null, cLng = null;
 function abrirModalCliente(c){
   clienteEditando = c ? c.id : null;
+  if($('cErr')) $('cErr').innerHTML = '';
   $('cTitulo').textContent = c ? 'Editar cliente' : 'Nuevo cliente';
   $('cNombre').value = c?.nombre||''; $('cRut').value = c?.rut||'';
   $('cTel').value = c?.telefono||''; $('cEmail').value = c?.email||'';
@@ -2387,6 +2388,16 @@ $('cConectar').onclick = async ()=>{
     $('cConectar').disabled = false;
   }
 };
+/* aviso temprano: apenas termina de escribir el RUT de un cliente nuevo,
+   miramos si ya está en la red para no hacerle llenar toda la ficha al pepe */
+if($('cRut')) $('cRut').addEventListener('blur', async ()=>{
+  const rut = $('cRut').value.trim();
+  if(clienteEditando || !HAY_POOL || rut.length < 7) return;
+  if($('cErr').textContent) return;
+  const { data } = await sb.rpc('buscar_cliente_red', { p_rut: rut });
+  if(data && data.existe && data.vinculo === 'sin_vinculo') await ofrecerVinculoPorRut(rut);
+});
+
 $('nuevoCliente').onclick = ()=> abrirModalCliente(null);
 window.editarCliente = id => abrirModalCliente(clientes.find(c=>c.id===id));
 $('cGuardar').onclick = async ()=>{
@@ -2410,8 +2421,54 @@ $('cGuardar').onclick = async ()=>{
       ? sb.from('clientes').update(datos).eq('id', clienteEditando)
       : sb.from('clientes').insert(datos)));
   }
-  if(error){ $('cErr').textContent=error.message; return; }
+  if(error){
+    // el RUT ya existe en la red: no es un cliente nuevo, es uno que ya está
+    // y hay que pedirle permiso, no duplicarlo
+    if(datos.rut && /idx_clientes_rut_unico|duplicate key|clientes_rut/i.test(error.message||'')){
+      await ofrecerVinculoPorRut(datos.rut);
+      return;
+    }
+    $('cErr').textContent=error.message; return;
+  }
   cerrar('mCliente'); toast(clienteEditando?'Cliente actualizado':'Cliente creado');
+  await cargarTodo();
+};
+
+/* Ese RUT ya está en la red. En vez del error feo, le mostramos de quién es
+   y el botón para pedirle trabajar con él. */
+async function ofrecerVinculoPorRut(rut){
+  const caja = $('cErr');
+  caja.innerHTML = '<span style="color:var(--ink-2)">Ese RUT ya está en la red, buscando de quién es…</span>';
+  const { data, error } = await sb.rpc('buscar_cliente_red', { p_rut: rut });
+  if(error || !data || !data.existe){
+    caja.innerHTML = '<b>Ya hay otro cliente con ese RUT.</b> Puede ser de otra empresa de la red. ' +
+      'Revisá que esté bien escrito; si estás seguro, avisale al dueño del sistema para que lo mire desde el panel maestro.';
+    return;
+  }
+  const nom = esc(data.nombre||'ese cliente');
+  if(data.vinculo === 'activa'){
+    caja.innerHTML = `<span style="color:#006300"><b>${nom}</b> ya está en tu lista de clientes. No hace falta crearlo de nuevo.</span>`;
+    return;
+  }
+  if(data.vinculo === 'pendiente'){
+    caja.innerHTML = `<span style="color:#8a6100">Ya le mandaste una solicitud a <b>${nom}</b>. Falta que la acepte desde su portal.</span>`;
+    return;
+  }
+  caja.innerHTML = `
+    <div style="background:#EEF4FF;border:1px solid #C9DAF8;border-radius:10px;padding:12px;color:var(--ink)">
+      <b>${nom}</b> ya trabaja con otra empresa de la red${data.comuna?` <span class="cod">· ${esc(data.comuna)}</span>`:''}.
+      <div style="margin:6px 0 10px;font-size:12.5px;color:var(--ink-2)">
+        No hay que crearlo de nuevo: es el mismo cliente. Pedile trabajar con él y,
+        cuando acepte, sus pedidos te empiezan a llegar según las reglas que él ponga.
+      </div>
+      <button class="btn" onclick="pedirClienteDesdeFicha(${data.id})">📨 Pedirle trabajar con él</button>
+    </div>`;
+}
+
+window.pedirClienteDesdeFicha = async (id)=>{
+  const { data, error } = await sb.rpc('solicitar_cliente', { p_cliente_id:id });
+  if(error){ $('cErr').textContent = error.message; return; }
+  $('cErr').innerHTML = `<span style="color:#006300">✅ ${esc(data?.mensaje||'Solicitud enviada')}</span>`;
   await cargarTodo();
 };
 
