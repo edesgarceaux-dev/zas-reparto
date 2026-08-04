@@ -49,10 +49,11 @@ const r = await page.evaluate(async () => {
 
   // ---------- 3. selección múltiple ----------
   window.poolSeleccionarTodos(true);
-  ok('3. "todos" marca solo los 3 visibles de Maipú', document.getElementById('poolSelN').textContent==='3 pedidos marcados',
+  ok('3. "todos" marca solo los 3 visibles de Maipú', document.getElementById('poolSelN').textContent==='3 bultos marcados',
       document.getElementById('poolSelN').textContent);
-  ok('3b. el botón ofrece llevarse los de la comuna', document.getElementById('poolTomar').textContent.includes('de Maipú'),
-      document.getElementById('poolTomar').textContent);
+  ok('3b. y ofrece los repartidores para reasignarlos',
+      document.getElementById('poolRep').innerHTML.includes('Etienne'),
+      document.getElementById('poolRep').textContent);
   ok('3c. la barra de acción aparece', document.getElementById('poolBarra').style.display==='flex');
 
   // ---------- 4. tomar OK ----------

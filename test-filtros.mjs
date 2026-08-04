@@ -238,6 +238,101 @@ const r = await page.evaluate(async () => {
      window.__rpcs.some(x => x.n === 'desplanificar_pedidos') && window.__planes() === 0,
      JSON.stringify(window.__rpcs));
 
+  // ============================================================
+  // 14. «MI CARGA»: un bulto cargado se tiene que poder mover
+  // ============================================================
+  window.__rpcs = []; window.__upd = [];
+  eval(`
+    poolPedidos = [
+      { id:77, codigo:'ZAS-04000', envio_id:'47677019895', origen:'mercadolibre',
+        cliente_nombre:'Constanza Vidal', direccion:'Aldunate 1064', comuna:'Santiago',
+        estado:'asignado', cliente_id:1, empresa_reparto_id:1, repartidor_id:'r1',
+        cargado_en:'2026-08-04T11:31:00Z', fecha_pedido:'2026-08-04' },
+      { id:78, codigo:'ZAS-04001', envio_id:'47677019896', origen:'mercadolibre',
+        cliente_nombre:'Otro Cliente', direccion:'Bandera 55', comuna:'Santiago',
+        estado:'asignado', cliente_id:1, empresa_reparto_id:1, repartidor_id:'r1',
+        cargado_en:'2026-08-04T11:32:00Z', fecha_pedido:'2026-08-04' },
+    ];
+    poolSel = new Set();
+    window.__pintarPool = pintarPool;
+    window.__porId = pedidoPorId;
+    window.__verDetalle = verDetalle;
+    window.__asignarPool = () => document.getElementById('poolAsignar').onclick();
+    window.__quitarPool  = () => document.getElementById('poolDesasignar').onclick();
+  `);
+  window.__pintarPool();
+
+  ok('14. un bulto de Mi carga se encuentra por su id',
+     window.__porId(77) != null && window.__porId(77).cliente_nombre === 'Constanza Vidal');
+  ok('14b. y los de Pedidos se siguen encontrando igual',
+     window.__porId(1) != null && window.__porId(1).cliente_nombre === 'Patricia Morales');
+  ok('14c. un id que no existe da null', window.__porId(999) === null);
+
+  // la ficha se tiene que poder abrir: era lo que no pasaba
+  eval(`sb.from = (t) => ({
+    select: () => ({ eq: () => ({ order: () => Promise.resolve({data:[]}) }) }),
+    update: (v) => { const o = { in:(c,ids)=>{o.__ids=ids;return o;}, eq:(c,id)=>{o.__ids=[id];return o;},
+      not:()=>o, select:()=>o,
+      then:(f)=>{ window.__upd.push({v, ids:o.__ids||[]});
+        return Promise.resolve({data:(o.__ids||[]).map(id=>({id})),error:null}).then(f); } }; return o; },
+  });`);
+  $('mDetBody').innerHTML = '';
+  await window.__verDetalle(77);
+  ok('14d. hacer clic en la fila SÍ abre la ficha',
+     $('mDetBody').innerHTML.length > 0 && /Constanza Vidal/.test($('mDetBody').innerHTML),
+     $('mDetBody').textContent.slice(0, 60));
+  ok('14e. y la ficha ofrece cambiarle el estado',
+     /entregado|Entregado/.test($('mDetBody').innerHTML));
+
+  // ---------- 15. acciones en lote dentro de Mi carga ----------
+  const filasPool = () => [...$('tbodyPool').querySelectorAll('tr')]
+      .filter(tr => !tr.querySelector('.empty'));
+  ok('15. Mi carga muestra los 2 bultos', filasPool().length === 2, String(filasPool().length));
+  ok('15b. y ahora cada fila tiene su casilla',
+     $('tbodyPool').querySelectorAll('input[type="checkbox"]').length === 2);
+
+  window.poolAlternar(77, true);
+  window.poolAlternar(78, true);
+  ok('15c. al marcar aparece la barra de acciones',
+     $('poolBarra').style.display === 'flex', $('poolBarra').style.display);
+  ok('15d. que dice cuántos hay marcados', /2 bultos marcados/.test($('poolSelN').textContent),
+     $('poolSelN').textContent);
+
+  window.__upd = [];
+  $('poolRep').value = 'r2';
+  await window.__asignarPool();
+  ok('16. se puede reasignar en lote desde Mi carga',
+     window.__upd.some(u => u.v.repartidor_id === 'r2' && u.ids.includes(77) && u.ids.includes(78)),
+     JSON.stringify(window.__upd));
+
+  window.poolAlternar(77, true);
+  window.__upd = [];
+  await window.__quitarPool();
+  ok('16b. y quitarles la asignación',
+     window.__upd.some(u => u.v.repartidor_id === null && u.ids.includes(77)),
+     JSON.stringify(window.__upd));
+
+  window.poolAlternar(77, true);
+  window.__upd = [];
+  window.confirm = () => true;
+  $('poolEstado').value = 'entregado';
+  await $('poolEstado').onchange({ target: $('poolEstado') });
+  ok('17. se puede cerrar un bulto como entregado en lote',
+     window.__upd.some(u => u.v.estado === 'entregado' && u.ids.includes(77)),
+     JSON.stringify(window.__upd));
+  ok('17b. y el desplegable vuelve a cero para no repetir sin querer',
+     $('poolEstado').value === '', $('poolEstado').value);
+
+  window.poolAlternar(78, true);
+  window.__upd = [];
+  await $('poolCancelar').onclick();
+  ok('18. y cancelarlos', window.__upd.some(u => u.v.estado === 'cancelado' && u.ids.includes(78)),
+     JSON.stringify(window.__upd));
+
+  window.poolAlternar(77, true);
+  window.poolLimpiarSel();
+  ok('19. limpiar esconde la barra', $('poolBarra').style.display === 'none');
+
   return out;
 });
 

@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ZAS Reparto — Panel de Control</title>
-<!-- panel v1.43 -->
+<!-- panel v1.44 -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -224,13 +224,31 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         <select id="poolComuna" style="width:auto;min-width:150px" onchange="poolFiltrarComuna(this.value)"><option value="">Todas las comunas</option></select>
         <input type="search" id="poolBuscar" placeholder="Buscar cliente, dirección, n° de envío…" style="max-width:220px">
       </div>
-      <div id="poolBarra" style="display:none"></div>
-      <span id="poolSelN" style="display:none"></span><span id="poolTomar" style="display:none"></span>
+      <!-- v1.44 — acciones sobre los bultos ya cargados -->
+      <div id="poolBarra" style="display:none;background:var(--ink);color:#fff;border-radius:10px;padding:8px 14px;margin-bottom:10px;align-items:center;gap:10px;flex-wrap:wrap">
+        <b id="poolSelN"></b>
+        <select id="poolRep" style="width:auto;padding:6px 8px"></select>
+        <button class="btn" id="poolAsignar">Asignar</button>
+        <button class="btn btn-ghost" style="color:#fff;border-color:#666" id="poolDesasignar">Quitar asignación</button>
+        <select id="poolEstado" style="width:auto;padding:6px 8px">
+          <option value="">— cambiar estado —</option>
+          <option value="pendiente">⏳ Pendiente</option>
+          <option value="asignado">📋 Asignado</option>
+          <option value="aceptado">👍 Aceptado</option>
+          <option value="en_camino">🛵 En camino</option>
+          <option value="entregado">✅ Entregado</option>
+          <option value="no_entregado">❌ No entregado</option>
+        </select>
+        <button class="btn btn-ghost" style="color:#ff9d9d;border-color:#844" id="poolCancelar">🚫 Cancelar</button>
+        <span class="sp" style="flex:1"></span>
+        <button class="btn btn-ghost" style="color:#fff;border-color:#666" onclick="poolLimpiarSel()">✕ Limpiar</button>
+      </div>
+      <span id="poolTomar" style="display:none"></span>
       <div id="poolReglas" style="display:none;margin-bottom:10px;padding:9px 14px;border-radius:10px;font-size:12.5px;background:#EEF4FF;border:1px solid #C9DAF8;color:#1e3a6b"></div>
       <div id="poolAviso" style="display:none;margin-bottom:10px;padding:10px 14px;border-radius:10px;font-size:13px"></div>
       <div id="carRes" style="margin-bottom:10px;font-size:13px;color:var(--ink-2)"></div>
       <div class="tbl"><table id="tblPool">
-        <thead><tr><th>N° de envío</th><th>Cliente</th><th>Cliente final</th><th>Dirección</th><th>Comuna</th><th>Repartidor</th><th>Estado</th><th>Cargado</th></tr></thead>
+        <thead><tr><th><input type="checkbox" id="poolTodos" onclick="poolSeleccionarTodos(this.checked)"></th><th>N° de envío</th><th>Cliente</th><th>Cliente final</th><th>Dirección</th><th>Comuna</th><th>Repartidor</th><th>Estado</th><th>Cargado</th></tr></thead>
         <tbody id="tbodyPool"></tbody>
       </table></div>
     </section>
@@ -778,6 +796,14 @@ let misPlanes = [], avisosRed = [];
    que en esa base no existe, y el reparto se cortaba a la mitad.
    Por eso asignaba menos de lo que le pedías. */
 const esCompartido = p => !!p && HAY_POOL && p.empresa_reparto_id == null;
+
+/* 🐛 v1.44 — Buscar un pedido esté en la pestaña que esté.
+   Los bultos ya cargados viven en `poolPedidos` («📦 Mi carga»), no en
+   `pedidos`. Todo lo que resolvía por id miraba solo en `pedidos`, así que
+   al hacer clic en una fila de Mi carga NO PASABA NADA: no se podía abrir
+   la ficha, ni cambiarle el estado, ni cambiarle el repartidor. */
+const pedidoPorId = id => pedidos.find(x=>x.id===id) || poolPedidos.find(x=>x.id===id) || null;
+const todosLosPedidos = () => pedidos.concat(poolPedidos);
 const planDe = id => misPlanes.find(x=>x.pedido_id===id) || null;
 /* v1.33: reglas de reparto del cliente y frenos anti-acaparamiento */
 let configRed = { plazo_asignar_min:120, tope_sin_asignar:30 };
@@ -2792,8 +2818,8 @@ window.pedirClienteDesdeFicha = async (id)=>{
    encima, se lo pisaría a la otra empresa. Por eso va a plan_reparto, que
    guarda una fila por empresa. Recién al escanearlo pasa a ser mío. */
 async function asignarRepartidorA(ids, rep){
-  const mios        = ids.filter(id => { const p = pedidos.find(x=>x.id===id); return p && !esCompartido(p); });
-  const compartidos = ids.filter(id => { const p = pedidos.find(x=>x.id===id); return p &&  esCompartido(p); });
+  const mios        = ids.filter(id => { const p = pedidoPorId(id); return p && !esCompartido(p); });
+  const compartidos = ids.filter(id => { const p = pedidoPorId(id); return p &&  esCompartido(p); });
   let n = 0, errores = [], noEscritos = [];
 
   if(mios.length){
@@ -2870,8 +2896,8 @@ $('masivaAsignar').onclick = async ()=>{
    tocaba `pedidos`: el plan quedaba vivo y el «previsto» no se iba nunca.
    Ahora se borran los dos lados. */
 async function quitarAsignacionA(ids){
-  const mios        = ids.filter(id => { const p = pedidos.find(x=>x.id===id); return p && !esCompartido(p); });
-  const compartidos = ids.filter(id => { const p = pedidos.find(x=>x.id===id); return p &&  esCompartido(p); });
+  const mios        = ids.filter(id => { const p = pedidoPorId(id); return p && !esCompartido(p); });
+  const compartidos = ids.filter(id => { const p = pedidoPorId(id); return p &&  esCompartido(p); });
   let n = 0, previstos = 0, errores = [];
 
   if(mios.length){
@@ -2979,7 +3005,7 @@ $('pGuardar').onclick = async ()=>{
 };
 
 window.verDetalle = async (id)=>{
-  const p = pedidos.find(x=>x.id===id); if(!p) return;
+  const p = pedidoPorId(id); if(!p) return;
   const { data:hist } = await sb.from('pedido_historial').select().eq('pedido_id',id).order('creado_en');
   const { data:pruebas } = await sb.from('entregas_prueba').select().eq('pedido_id',id).order('creado_en',{ascending:false});
   const prueba = pruebas?.[0];
@@ -3027,6 +3053,18 @@ window.verDetalle = async (id)=>{
         ${reps.map(r=>`<option value="${r.id}">${esc(r.nombre)}</option>`).join('')}</select>
       <button class="btn" onclick="asignar(${p.id})">Asignar</button>
     </div>
+    ${!FIN.includes(p.estado) ? `
+    <label style="margin-top:14px">Mover el estado desde acá</label>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      ${['pendiente','asignado','aceptado','en_camino','entregado','no_entregado']
+        .filter(e=>e!==p.estado)
+        .map(e=>`<button class="btn btn-ghost" style="padding:6px 12px;font-size:12.5px"
+                  onclick="cambiarEstado(${p.id},'${e}')">${EST[e][1]} ${EST[e][0]}</button>`).join('')}
+    </div>
+    <p style="color:var(--muted);font-size:11.5px;margin-top:5px">
+      Normalmente lo mueve el repartidor desde la app. Esto es para cuando hay que
+      corregirlo a mano desde la oficina.
+    </p>` : ''}
     <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
       ${!FIN.includes(p.estado)?`<button class="btn btn-ghost" onclick="cambiarEstado(${p.id},'cancelado')">🚫 Cancelar pedido</button>`:''}
       ${p.repartidor_id && !FIN.includes(p.estado)?`<button class="btn btn-ghost" onclick="desasignar(${p.id})">↩️ Quitar asignación</button>`:''}
@@ -3065,7 +3103,7 @@ window.verDetalle = async (id)=>{
   $('mDet').classList.add('on');
 };
 window.copiarSeguimiento = (id)=>{
-  const p = pedidos.find(x=>x.id===id); if(!p?.token_seguimiento) return;
+  const p = pedidoPorId(id); if(!p?.token_seguimiento) return;
   const link = `https://edesgarceaux-dev.github.io/zas-reparto/seguimiento.html?p=${encodeURIComponent(p.codigo||'')}&t=${p.token_seguimiento}`;
   navigator.clipboard.writeText(link);
   toast('🔗 Link de seguimiento copiado — pégalo en WhatsApp o correo');
@@ -3080,7 +3118,7 @@ window.corregirDireccionPedido = async (id)=>{
   const cambios = { direccion:dir, comuna:com||null, lat:coords?.lat??null, lng:coords?.lng??null };
   const { error } = await sb.from('pedidos').update(cambios).eq('id', id);
   if(error){ $('dDirEstado').innerHTML=`<span style="color:#d03b3b">${error.message}</span>`; return; }
-  const p = pedidos.find(x=>x.id===id); if(p) Object.assign(p, cambios);
+  const p = pedidoPorId(id); if(p) Object.assign(p, cambios);
   $('dDirEstado').innerHTML = coords
     ? (coords.tipo==='calle'
         ? '<span style="color:#b45b00">✓ Ubicada a nivel de CALLE (el número no está en el mapa) — el punto quedará aproximado</span>'
@@ -3264,6 +3302,7 @@ function pintarPool(){
     : '';
   $('tbodyPool').innerHTML = lista.length ? lista.map(p=>`
     <tr onclick="verDetalle(${p.id})">
+      <td onclick="event.stopPropagation()"><input type="checkbox" ${poolSel.has(p.id)?'checked':''} onchange="poolAlternar(${p.id}, this.checked)"></td>
       <td class="cod">${numeroDeEnvio(p)}</td>
       <td>${p.cliente_id? esc(clienteDe(p.cliente_id)||'…') : '<span class="cod">—</span>'}</td>
       <td><b>${esc(p.cliente_nombre)}</b></td>
@@ -3273,7 +3312,7 @@ function pintarPool(){
       <td>${stChip(p.estado)}</td>
       <td class="cod">${fechaHora(p.cargado_en)}</td>
     </tr>`).join('')
-    : `<tr><td colspan="8" class="empty">${n? 'Ningún bulto cargado calza con este filtro.' : 'Todavía no cargaste ningún bulto. Aparecen acá cuando tus repartidores escanean las etiquetas.'}</td></tr>`;
+    : `<tr><td colspan="9" class="empty">${n? 'Ningún bulto cargado calza con este filtro.' : 'Todavía no cargaste ningún bulto. Aparecen acá cuando tus repartidores escanean las etiquetas.'}</td></tr>`;
 
   pintarReglasPool();
 
@@ -3281,13 +3320,69 @@ function pintarPool(){
   const barra = $('poolBarra');
   if(barra){
     barra.style.display = marcados ? 'flex' : 'none';
-    $('poolSelN').textContent = marcados===1 ? '1 pedido marcado' : marcados+' pedidos marcados';
-    $('poolTomar').textContent = poolComunaSel && marcados===lista.length
-      ? `✋ Tomar los ${marcados} de ${poolComunaSel}` : '✋ Tomar seleccionados';
+    $('poolSelN').textContent = marcados===1 ? '1 bulto marcado' : marcados+' bultos marcados';
+    $('poolRep').innerHTML = '<option value="">— elegir repartidor —</option>' +
+      perfiles.filter(x=>x.activo && x.rol!=='empresa')
+        .map(r=>`<option value="${r.id}">${esc(r.nombre)}${r.rol==='admin'?' (admin)':''}</option>`).join('');
   }
   const todos = $('poolTodos');
   if(todos) todos.checked = lista.length>0 && marcados===lista.length;
 }
+
+/* ---------- acciones sobre los bultos ya cargados (v1.44) ----------
+   Antes «Mi carga» era solo de lectura: un bulto que entraba ahí no se podía
+   reasignar ni cerrar desde el panel. */
+window.poolAlternar = (id, v)=>{ v ? poolSel.add(id) : poolSel.delete(id); pintarPool(); };
+window.poolLimpiarSel = ()=>{ poolSel.clear(); pintarPool(); };
+
+async function poolAccion(fn, exito){
+  const ids = [...poolSel];
+  if(!ids.length) return;
+  const r = await fn(ids);
+  if(r?.errores?.length){ toast('Error: '+r.errores[0]); return; }
+  if(r?.error){ toast('Error: '+r.error); return; }
+  poolSel.clear();
+  toast(exito(r, ids));
+  cargarTodo();
+}
+
+if($('poolAsignar')) $('poolAsignar').onclick = async ()=>{
+  const rep = $('poolRep').value;
+  if(!rep){ toast('Elegí un repartidor primero'); return; }
+  await poolAccion(ids => asignarRepartidorA(ids, rep),
+                   r => `${r.n} bulto(s) asignados a ${nombreDe(rep)}`);
+};
+
+if($('poolDesasignar')) $('poolDesasignar').onclick = async ()=>{
+  await poolAccion(ids => quitarAsignacionA(ids),
+                   r => `Asignación quitada a ${r.n} bulto(s)`);
+};
+
+if($('poolEstado')) $('poolEstado').onchange = async (e)=>{
+  const est = e.target.value;
+  e.target.value = '';
+  if(!est) return;
+  const ids = [...poolSel];
+  if(!ids.length) return;
+  const nom = (EST[est]||[est])[0];
+  if(!confirm(`¿Pasar ${ids.length} bulto(s) a «${nom}»?`)) return;
+  await poolAccion(async (lista)=>{
+    const { data, error } = await sb.from('pedidos').update({estado: est})
+      .in('id', lista).select('id');
+    return error ? { error: error.message } : { n: (data||[]).length };
+  }, r => `${r.n} bulto(s) pasaron a «${nom}»`);
+};
+
+if($('poolCancelar')) $('poolCancelar').onclick = async ()=>{
+  const ids = [...poolSel];
+  if(!ids.length) return;
+  if(!confirm(`¿Cancelar ${ids.length} bulto(s)? Se pueden volver a abrir cambiándoles el estado.`)) return;
+  await poolAccion(async (lista)=>{
+    const { data, error } = await sb.from('pedidos').update({estado:'cancelado'})
+      .in('id', lista).select('id');
+    return error ? { error: error.message } : { n: (data||[]).length };
+  }, r => `${r.n} bulto(s) cancelados`);
+};
 
 window.tomarSeleccionados = ()=> tomarDelPool([...poolSel]);
 
@@ -4002,7 +4097,7 @@ window.sugerirDireccion = (id)=>{
 };
 window.usarSugerencia = async (id, jsonStr)=>{
   const o = JSON.parse(jsonStr);
-  const p = pedidos.find(x=>x.id===id); if(!p) return;
+  const p = pedidoPorId(id); if(!p) return;
   const cambios = { direccion:o.linea1, comuna:o.comuna||null, lat:o.lat, lng:o.lng };
   const { error } = await sb.from('pedidos').update(cambios).eq('id', id);
   if(error){ toast('Error al guardar: '+error.message); return; }
@@ -4011,7 +4106,7 @@ window.usarSugerencia = async (id, jsonStr)=>{
   dibujarRuta();
 };
 window.corregirDireccion = async (id)=>{
-  const p = pedidos.find(x=>x.id===id); if(!p) return;
+  const p = pedidoPorId(id); if(!p) return;
   const dir = $('fixDir-'+id).value.trim(), com = $('fixCom-'+id).value.trim();
   if(!dir){ toast('Escribe una dirección'); return; }
   $('geoEstado').textContent = 'Buscando dirección corregida…';

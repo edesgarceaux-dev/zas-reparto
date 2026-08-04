@@ -1,6 +1,6 @@
 # TODO LO QUE HAY QUE HACER — en orden
 
-Panel v1.43 · Maestro v1.2 · APK v2.8.1
+Panel v1.44 · Maestro v1.2 · APK v2.8.1
 Hacelo de arriba abajo, sin saltear. Toma unos 20 minutos.
 
 ---
@@ -38,14 +38,14 @@ la raíz de `zas-reparto\` (pisando lo que haya):
 
 | Archivo que te mandé | Dónde va |
 |---|---|
-| `index.html` | raíz — **es el panel v1.43 ya renombrado** |
+| `index.html` | raíz — **es el panel v1.44 ya renombrado** |
 | `panel-maestro.html` | raíz |
 | `seguimiento.html` | raíz |
 
 ```
 git add index.html panel-maestro.html seguimiento.html panel/ supabase/ test-*.mjs PASOS-RED.md
 git add ZAS-Reparto-v2.8.1-moderno.apk ZAS-Reparto-v2.8.1-antiguo.apk
-git commit -m "v1.43 filtros, n° de envío ML y arreglo del reparto automático"
+git commit -m "v1.44 Mi carga accionable + arreglos del reparto automático"
 git push
 ```
 
@@ -155,6 +155,19 @@ Y el orden de ruta se guarda de a 40 en paralelo: con 250 bultos tardaba minutos
 
 Y cuando la base deja pedidos afuera, ahora te dice **por qué**, agrupado:
 «7 no se pudieron asignar: 5 fuera de la zona de reparto · 2 ya está entregado».
+
+### «Mi carga» ya no es solo de lectura (v1.44)
+
+Un bulto que entraba a **📦 Mi carga** quedaba trabado: hacer clic en la fila no
+hacía nada. El panel buscaba el pedido solo en la lista de *Pedidos*, y los bultos
+cargados viven en otra lista. Ahora:
+
+- **Hacer clic en la fila abre la ficha**, como en cualquier otra pestaña.
+- En la ficha hay una fila de botones **«Mover el estado desde acá»**: pendiente,
+  asignado, aceptado, en camino, entregado, no entregado. Normalmente lo mueve el
+  repartidor desde la app; esto es para corregir a mano desde la oficina.
+- La tabla tiene **casillas** y una barra de acciones: reasignar a otro repartidor,
+  quitar la asignación, cambiar el estado de varios de una, o cancelarlos.
 
 ---
 
