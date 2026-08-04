@@ -62,9 +62,9 @@ const r = await page.evaluate(async () => {
   // ---------- 2. la lista marca a quien puede ----------
   window.__pintarReps();
   const tabla = $('tbodyReps').innerHTML;
-  ok('2. la lista marca al que puede asignar', /Jefe Bodega<\/b>.*?asigna/s.test(tabla));
+  ok('2. la lista marca al que puede asignar', /Jefe Bodega[\s\S]*?asigna/.test(tabla));
   ok('2b. y no marca al repartidor común',
-     !/Juan Pérez<\/b>\s*<span class="st" style="color:#8a5a00/.test(tabla));
+     !/Juan Pérez[\s\S]*?asigna[\s\S]*?<\/tr>/.test(tabla.split('Jefe Bodega')[0]));
 
   // ---------- 3. abrir la ficha refleja el estado real ----------
   window.__editarRep('u3');
@@ -107,7 +107,7 @@ const r = await page.evaluate(async () => {
   ok('6b. y el nombre igual se guarda',
      window.__updates[1]?.v.nombre === 'Jefe Bodega 2');
   ok('6c. y le avisa qué archivo correr',
-     /migracion-asignar-por-qr/.test(window.__ultimoToast || ''),
+     /migracion-permisos|migracion-asignar-por-qr/.test(window.__ultimoToast || ''),
      window.__ultimoToast);
 
   // ---------- 7. el nombre sigue siendo obligatorio ----------

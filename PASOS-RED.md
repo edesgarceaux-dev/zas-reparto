@@ -1,6 +1,6 @@
 # TODO LO QUE HAY QUE HACER — en orden
 
-Panel v1.41 · Maestro v1.2 · APK v2.7.0
+Panel v1.42 · Maestro v1.2 · APK v2.8.0
 Hacelo de arriba abajo, sin saltear. Toma unos 20 minutos.
 
 ---
@@ -18,11 +18,13 @@ Uno por uno. Todos son seguros de repetir. Están en la carpeta `supabase/`.
 | 4 | `migracion-escaneo-reclama.sql` | el escaneo reclama el pedido |
 | 5 | `migracion-plan-y-carga.sql` | planificar en paralelo + «Mi carga» + avisos |
 | 6 | `migracion-asignar-por-qr.sql` | asignar repartidor escaneando, desde la app |
+| 7 | `migracion-permisos.sql` | quién entra al panel y quién a la app |
 
 **Qué mirar en cada una** (te devuelven una tabla al final):
 - En la **3**: `comunas_que_reparte` tiene que dar **52**. Abajo te lista las comunas que quedaron fuera de zona — si ves una de la RM mal escrita, la agregás después desde el maestro.
 - En la **5**: `clientes_por_reglas` + `clientes_modo_abierto` tiene que ser el total de tus clientes.
 - En la **6**: `permiso_creado` = 1 y `funciones_creadas` = 3. `cuentas_que_pueden_asignar` son tus admin, que lo reciben prendido.
+- En la **7**: la fila `repartidor` tiene que decir `entran_al_panel = 0`. Ahí es donde tus repartidores dejan de poder entrar a la página.
 
 **No corras** `migracion-pool-empresas.sql`: está anulada, el archivo es solo un cartel.
 
@@ -42,8 +44,8 @@ la raíz de `zas-reparto\` (pisando lo que haya):
 
 ```
 git add index.html panel-maestro.html seguimiento.html panel/ supabase/ test-*.mjs PASOS-RED.md
-git add ZAS-Reparto-v2.7.0-moderno.apk ZAS-Reparto-v2.7.0-antiguo.apk
-git commit -m "v1.41 asignar por QR desde la app"
+git add ZAS-Reparto-v2.8.0-moderno.apk ZAS-Reparto-v2.8.0-antiguo.apk
+git commit -m "v1.42 asignar por QR + permisos de panel y app"
 git push
 ```
 
@@ -53,7 +55,7 @@ Esperá ~1 minuto a que GitHub Pages reconstruya y entrá con **Ctrl+F5**.
 
 ## 3. Instalar la APK
 
-**`ZAS-Reparto-v2.7.0-moderno.apk`** en los teléfonos de los repartidores
+**`ZAS-Reparto-v2.8.0-moderno.apk`** en los teléfonos de los repartidores
 **y en el del que reparte la pega en bodega**.
 (La `-antiguo` es solo para teléfonos viejos de 32 bits.)
 
@@ -65,9 +67,20 @@ Sin esta versión el escaneo no reclama nada, así que los pedidos compartidos s
 
 **En el panel maestro → Reglas de la red**: revisá abajo la caja **Zona de cobertura**. Tienen que estar las 52 comunas. Si repartís a alguna más, agregala ahí.
 
-**En Repartidores → Editar**, a quien reparte la pega en bodega prendele la casilla
-**«📲 Puede asignar pedidos desde la app»**. Tus admin ya lo tienen prendido. En la lista
-queda marcado con **📲 asigna**.
+**En Repartidores → Editar** hay una caja de **PERMISOS** con tres interruptores:
+
+| | Qué hace | Cómo arranca |
+|---|---|---|
+| 🖥️ **panel web** | entra a esta página con su cuenta | admin sí · repartidor **no** |
+| 📱 **app del teléfono** | entra a la APK de reparto | admin y repartidor sí · cliente no |
+| 📲 **asignar por QR** | dentro de la app, reparte bultos entre repartidores | solo admin |
+
+En la lista de Repartidores se ve de un vistazo por dónde entra cada uno. Lo que hay
+que revisar una vez: a quien reparte la pega en bodega, prendele **📲 asignar**; a una
+cuenta de oficina que nunca sale a repartir, apagale **📱 app**.
+
+Si te apagás el panel a vos mismo, el panel te avisa y te pide confirmación: quedarías
+afuera hasta que otro admin te lo prenda.
 
 **En el portal de cada cliente → Mis empresas de reparto**: elegí cómo quiere repartir.
 - **Por mis reglas**: le da comunas a cada empresa. Lo que no calza con nadie queda compartido.
@@ -82,6 +95,9 @@ queda marcado con **📲 asigna**.
 3. Entrá con la cuenta de Rapiditos: el mismo pedido le aparece a ella también, y puede asignarle **su** repartidor sin pisar el tuyo.
 4. Que un repartidor escanee esa etiqueta con la app. El pedido pasa a su empresa, se va a **📦 Mi carga**, y desaparece de la otra.
 5. En el panel de la empresa que lo perdió aparece la franja **📣 «salió de tu ruta»** diciendo quién se lo llevó.
+
+**Las puertas**: entrá al panel con la cuenta de un repartidor. Te tiene que salir el
+cartel **«Esta cuenta usa la app»** con su nombre, y no dejarlo pasar.
 
 **Y el atajo de bodega**: entrá a la app con la cuenta habilitada, tocá **Asignar**
 arriba a la derecha, elegí un repartidor y pasá tres bultos por la cámara. Los tres

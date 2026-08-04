@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ZAS Reparto — Panel de Control</title>
-<!-- panel v1.41 -->
+<!-- panel v1.42 -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -129,6 +129,23 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     <input id="lPass" type="password" autocomplete="current-password">
     <div class="err" id="lErr"></div>
     <button class="btn" id="lBtn" style="width:100%">Ingresar</button>
+  </div>
+</div>
+
+<!-- ============ PUERTA CERRADA: esta cuenta es solo de la app ============ -->
+<div id="soloApp" style="display:none;min-height:100vh;align-items:center;justify-content:center;padding:24px">
+  <div class="card" style="text-align:center">
+    <div class="logo">📱</div>
+    <h1>Esta cuenta usa la app</h1>
+    <p style="margin-top:8px;line-height:1.5">
+      Hola <b id="saNombre"></b>: tu cuenta entra por la <b>app ZAS Reparto</b> del
+      teléfono, no por esta página.
+    </p>
+    <p style="color:var(--muted);font-size:12.5px;margin-top:12px;line-height:1.5">
+      Si necesitás entrar acá, pedile a tu administrador que te habilite el panel
+      desde <b>Repartidores → Editar</b>.
+    </p>
+    <button class="btn btn-ghost" id="saSalir" style="width:100%;margin-top:18px">Volver</button>
   </div>
 </div>
 
@@ -664,16 +681,38 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
   <p style="color:var(--muted);font-size:11.5px;margin-top:4px">
     ⭐ "🤖 Repartir auto" le dará primero los pedidos de estas comunas, en ese orden de prioridad.
   </p>
-  <div style="margin-top:14px;padding:12px;background:#FAF7F2;border:1px solid #EADFCE;border-radius:10px">
-    <label style="display:flex;align-items:center;gap:9px;margin:0;cursor:pointer">
+  <div style="margin-top:14px;padding:14px;background:#FAF7F2;border:1px solid #EADFCE;border-radius:10px">
+    <b style="font-size:13px;letter-spacing:.3px;color:var(--ink-2)">PERMISOS DE ESTA CUENTA</b>
+
+    <label style="display:flex;align-items:center;gap:9px;margin:12px 0 0;cursor:pointer">
+      <input type="checkbox" id="ePuedePanel" style="width:17px;height:17px;margin:0">
+      <b style="font-size:13.5px">🖥️ Puede entrar al panel web</b>
+    </label>
+    <p style="color:var(--muted);font-size:11.5px;margin:5px 0 0 26px">
+      Con esto apagado, si intenta entrar a esta página le aparece un cartel que le dice
+      que use la app. Los repartidores arrancan apagados.
+    </p>
+
+    <label style="display:flex;align-items:center;gap:9px;margin:12px 0 0;cursor:pointer">
+      <input type="checkbox" id="ePuedeApp" style="width:17px;height:17px;margin:0">
+      <b style="font-size:13.5px">📱 Puede entrar a la app del teléfono</b>
+    </label>
+    <p style="color:var(--muted);font-size:11.5px;margin:5px 0 0 26px">
+      Apagalo para una cuenta de oficina que nunca sale a repartir.
+    </p>
+
+    <label style="display:flex;align-items:center;gap:9px;margin:12px 0 0;cursor:pointer">
       <input type="checkbox" id="ePuedeAsignar" style="width:17px;height:17px;margin:0">
       <b style="font-size:13.5px">📲 Puede asignar pedidos desde la app</b>
     </label>
-    <p style="color:var(--muted);font-size:11.5px;margin:6px 0 0 26px">
+    <p style="color:var(--muted);font-size:11.5px;margin:5px 0 0 26px">
       En bodega abre la app, elige un repartidor y va pasando los bultos por la cámara:
       cada escaneo deja el pedido a nombre de esa persona. Dáselo a quien reparte la pega,
       no a todos.
     </p>
+
+    <div id="ePermAviso" style="display:none;margin-top:12px;font-size:11.5px;color:#8a6100;
+         background:#FFF8E6;border:1px solid #F0E0B0;border-radius:8px;padding:8px 10px"></div>
   </div>
   <p style="color:var(--muted);font-size:11.5px;margin-top:8px">
     ℹ️ El correo con el que <b>inicia sesión</b> no se cambia desde aquí (es el de la cuenta);
@@ -769,10 +808,21 @@ $('salir').onclick = ()=> sb.auth.signOut();
 
 let sesionMontada = null;   // uid ya montado en pantalla
 let intentosPerfil = 0;
+let rebotado = false;       // true mientras se muestra el cartel "usá la app"
+$('saSalir').onclick = ()=>{
+  rebotado = false;
+  $('soloApp').style.display='none';
+  $('login').style.display='flex';
+  $('lPass').value=''; $('lErr').textContent='';
+};
 async function manejarSesion(session){
   if(!session){
     sesionMontada = null;
     $('app').style.display='none'; $('repApp').style.display='none'; $('empApp').style.display='none';
+    // si acabamos de rebotar a alguien que solo usa la app, el cierre de
+    // sesión es parte del rebote: hay que dejarle el cartel en pantalla
+    if(rebotado){ rebotado = false; return; }
+    $('soloApp').style.display='none';
     $('login').style.display='flex';
     return;
   }
@@ -786,8 +836,28 @@ async function manejarSesion(session){
   intentosPerfil = 0;
   if(!perfil){ $('lErr').textContent='No se encontró tu perfil.'; await sb.auth.signOut(); return; }
   if(perfil.activo===false){ $('lErr').textContent='Tu cuenta está desactivada.'; await sb.auth.signOut(); return; }
+
+  /* ---- la puerta del panel (v1.42) ----
+     Cada cuenta tiene un interruptor `puede_panel`. Si está apagado, esta
+     página no es para ella: se le explica y se cierra la sesión.
+     Si la columna todavía no existe (falta migracion-permisos.sql) el valor
+     llega `undefined` y NO se bloquea a nadie: se sigue como antes. */
+  const puedePanel = perfil.puede_panel === undefined
+      ? true                                   // base sin la migración
+      : perfil.puede_panel === true;
+  if(!puedePanel){
+    $('saNombre').textContent = perfil.nombre || 'compañero';
+    $('login').style.display='none';
+    $('soloApp').style.display='flex';
+    rebotado = true;
+    sesionMontada = null;
+    await sb.auth.signOut();
+    return;
+  }
+
   sesionMontada = session.user.id;
   $('login').style.display='none';
+  $('soloApp').style.display='none';
   if(perfil.rol==='admin'){
     adminUid = session.user.id;
     miEmpresa = perfil.empresa_reparto_id ?? null;
@@ -2276,13 +2346,28 @@ function pintarPedidos(){
   pintarBarraMasiva();
 }
 
+/* v1.42 — de un vistazo: por dónde entra cada persona y qué puede hacer.
+   Si la base todavía no tiene las columnas, se muestra como antes. */
+function marcasPermisos(r){
+  const hayPuertas = r.puede_panel !== undefined || r.puede_app !== undefined;
+  const hayAsignar = r.puede_asignar !== undefined;
+  if(!hayPuertas && !hayAsignar) return '';   // base sin ninguna migración
+  const m = [];
+  if(r.puede_panel) m.push('<span title="Entra al panel web">🖥️ panel</span>');
+  if(r.puede_app)   m.push('<span title="Entra a la app del teléfono">📱 app</span>');
+  if(r.puede_asignar) m.push('<span style="color:#8a5a00" title="Puede asignar bultos escaneando">📲 asigna</span>');
+  if(m.length) return m.join(' · ');
+  // sin marcas: solo es noticia si las puertas existen y las dos están cerradas
+  return hayPuertas ? '<span style="color:#a11">⛔ no entra a ningún lado</span>' : '';
+}
+
 function pintarReps(){
   // repartidores + administradores (los admin también pueden repartir)
   const reps = perfiles.filter(p=>p.rol!=='empresa').sort((a,b)=>
     (a.rol===b.rol ? a.nombre.localeCompare(b.nombre) : a.rol==='repartidor' ? -1 : 1));
   $('tbodyReps').innerHTML = reps.length? reps.map(r=>`
     <tr style="cursor:default">
-      <td><b>${esc(r.nombre)}</b>${r.rol==='admin'?' <span class="st" style="color:#2a78d6;font-size:11px">👑 admin</span>':''}${r.puede_asignar?' <span class="st" style="color:#8a5a00;font-size:11px" title="Puede asignar pedidos escaneando desde la app">📲 asigna</span>':''}</td>
+      <td><b>${esc(r.nombre)}</b>${r.rol==='admin'?' <span class="st" style="color:#2a78d6;font-size:11px">👑 admin</span>':''}<br><span style="font-size:11px;color:var(--muted)">${marcasPermisos(r)}</span></td>
       <td>${esc(r.telefono||'—')}</td>
       <td>${esc(r.direccion||'—')}${r.comuna_preferida?`<br><span class="cod">⭐ prefiere ${esc(r.comuna_preferida)}</span>`:''}</td>
       <td>${esc(r.correo||'—')}</td>
@@ -2838,7 +2923,17 @@ window.editarRep = (id)=>{
   $('eNombre').value = r.nombre||''; $('eTel').value = r.telefono||'';
   $('eDir').value = r.direccion||''; $('eCorreo').value = r.correo||'';
   $('eComuna').value = r.comuna_preferida||'';
+  // los tres permisos. Si la base todavía no tiene las columnas llegan
+  // `undefined`: se muestran como estaban antes de existir (todo abierto).
+  $('ePuedePanel').checked   = r.puede_panel   === undefined ? true : r.puede_panel === true;
+  $('ePuedeApp').checked     = r.puede_app     === undefined ? true : r.puede_app   === true;
   $('ePuedeAsignar').checked = r.puede_asignar === true;
+  // avisar si se está por dejar a alguien afuera de todo, o a uno mismo
+  const av = $('ePermAviso'); av.style.display='none'; av.textContent='';
+  if(id === adminUid) {
+    av.style.display='block';
+    av.textContent = '⚠️ Esta es TU cuenta: si te apagás el panel, la próxima vez que entres te va a rebotar.';
+  }
   $('eErr').textContent='';
   $('mEditRep').classList.add('on'); $('eNombre').focus();
 };
@@ -2849,15 +2944,22 @@ $('eGuardar').onclick = async ()=>{
     direccion:$('eDir').value.trim()||null, correo:$('eCorreo').value.trim()||null,
     comuna_preferida:$('eComuna').value.trim()||null,
     puede_asignar:$('ePuedeAsignar').checked,
+    puede_panel:$('ePuedePanel').checked,
+    puede_app:$('ePuedeApp').checked,
   };
+  if(repEditando === adminUid && !datos.puede_panel &&
+     !confirm('Estás apagando el panel para TU PROPIA cuenta. La próxima vez que entres te va a rebotar y vas a necesitar que otro admin te lo prenda.\n\n¿Seguro?')){
+    return;
+  }
   let { error } = await sb.from('perfiles').update(datos).eq('id', repEditando);
-  if(error && /puede_asignar/i.test(error.message)){
-    // falta migracion-asignar-por-qr.sql: guardar todo lo demás igual
-    const { puede_asignar, ...resto } = datos;
+  if(error && /puede_panel|puede_app|puede_asignar/i.test(error.message)){
+    // faltan migracion-asignar-por-qr.sql / migracion-permisos.sql:
+    // guardar todo lo demás igual, sin perder lo que escribió
+    const { puede_asignar, puede_panel, puede_app, ...resto } = datos;
     ({ error } = await sb.from('perfiles').update(resto).eq('id', repEditando));
     if(!error){
       cerrar('mEditRep');
-      toast('⚠️ Guardado — para el permiso de asignar por QR corré migracion-asignar-por-qr.sql');
+      toast('⚠️ Guardado — para los permisos corré migracion-permisos.sql');
       cargarTodo(); return;
     }
   }
