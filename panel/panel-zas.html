@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ZAS Reparto — Panel de Control</title>
+<!-- panel v1.33 -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -61,7 +62,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
   header .logo{width:34px;height:34px;font-size:17px;border-radius:9px}
   header h1{font-size:16px}
   nav{display:flex; gap:4px; margin-left:14px}
-  nav button{background:none; border:none; padding:16px 14px; color:var(--ink-2); border-bottom:2px solid transparent; font-weight:500}
+  nav button{background:none; border:none; padding:16px 14px; color:var(--ink-2); border-bottom:2px solid transparent; font-weight:500; white-space:nowrap}
   nav button.on{color:var(--brand); border-bottom-color:var(--brand); font-weight:600}
   #who{margin-left:auto; color:var(--muted); font-size:13px}
   main{max-width:1750px; margin:0 auto; padding:20px}
@@ -139,8 +140,11 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     <nav>
       <button data-t="resumen" class="on">Resumen</button>
       <button data-t="pedidos">Pedidos</button>
+      <button data-t="pool" id="navPool" style="display:none">📥 Pool<span id="poolN" style="display:none;margin-left:5px;background:#0CA30C;color:#fff;border-radius:99px;font-size:10px;min-width:16px;height:16px;line-height:16px;text-align:center;padding:0 4px;font-weight:700;vertical-align:middle">0</span></button>
       <button data-t="clientes">Clientes</button>
       <button data-t="repartidores">Repartidores</button>
+      <button data-t="empresas" id="navEmpresas" style="display:none" title="Empresas de reparto que usan este sistema">🚚 Empresas</button>
+      <button id="navMaestro" style="display:none" title="Panel maestro de la red" onclick="location.href='panel-maestro.html'">🛰️ Maestro</button>
       <button data-t="mapa">Mapa</button>
       <button data-t="reportes">Reportes</button>
     </nav>
@@ -173,6 +177,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         <button class="btn btn-ghost" id="btnSyncMl" onclick="sincronizarEnviosMl()" title="Rellena el n° de envío de las ventas Flex para que la app pueda escanear sus etiquetas">🔄 Sincronizar envíos ML</button>
         <button class="btn" id="nuevoPedido">+ Nuevo pedido</button>
       </div>
+      <div id="avisoReloj" style="display:none;background:#FFF8EC;border:1px solid #F0D9A8;border-radius:10px;padding:9px 14px;margin-bottom:10px;font-size:13px"></div>
       <div id="barraMasiva" style="display:none;background:var(--ink);color:#fff;border-radius:10px;padding:8px 14px;margin-bottom:10px;align-items:center;gap:10px">
         <b id="masivaN"></b>
         <select id="masivaRep" style="width:auto;padding:6px 8px"></select>
@@ -188,13 +193,50 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       </table></div>
     </section>
 
+    <!-- Pool -->
+    <section id="t-pool" style="display:none">
+      <div class="bar">
+        <span style="color:var(--muted);font-size:13px">Pedidos <b>sin dueño</b>. El primero que los toma se los queda: desde ese momento ninguna otra empresa los ve.</span>
+        <span class="sp"></span>
+        <select id="poolComuna" style="width:auto;min-width:150px" onchange="poolFiltrarComuna(this.value)"><option value="">Todas las comunas</option></select>
+        <input type="search" id="poolBuscar" placeholder="Buscar cliente, dirección…" style="max-width:220px">
+      </div>
+      <div id="poolBarra" style="display:none;background:var(--ink);color:#fff;border-radius:10px;padding:8px 14px;margin-bottom:10px;align-items:center;gap:10px">
+        <b id="poolSelN"></b>
+        <button class="btn" id="poolTomar" style="background:#0CA30C;border-color:#0CA30C" onclick="tomarSeleccionados()">✋ Tomar seleccionados</button>
+        <span class="sp" style="flex:1"></span>
+        <button class="btn btn-ghost" style="color:#fff;border-color:#666" onclick="poolLimpiar()">✕ Limpiar</button>
+      </div>
+      <div id="poolReglas" style="display:none;margin-bottom:10px;padding:9px 14px;border-radius:10px;font-size:12.5px;background:#EEF4FF;border:1px solid #C9DAF8;color:#1e3a6b"></div>
+      <div id="poolAviso" style="display:none;margin-bottom:10px;padding:10px 14px;border-radius:10px;font-size:13px"></div>
+      <div class="tbl"><table id="tblPool">
+        <thead><tr><th><input type="checkbox" id="poolTodos" onclick="poolSeleccionarTodos(this.checked)"></th><th>Código</th><th>Empresa</th><th>Cliente final</th><th>Dirección</th><th>Comuna</th><th>Por qué está acá</th><th>Entró al pool</th><th></th></tr></thead>
+        <tbody id="tbodyPool"></tbody>
+      </table></div>
+    </section>
+
+    <!-- Empresas de reparto (solo super-admin) -->
+    <section id="t-empresas" style="display:none">
+      <div class="bar">
+        <span style="color:var(--muted);font-size:13px">Las empresas de reparto que usan este sistema. Cada una ve <b>solo</b> sus pedidos, su gente y sus clientes.</span>
+        <span class="sp"></span>
+        <button class="btn" id="nuevaEmpresa">+ Nueva empresa de reparto</button>
+      </div>
+      <div class="tbl"><table>
+        <thead><tr><th>Empresa</th><th>Contacto</th><th>Gente</th><th>Clientes habilitados</th><th>Pedidos hoy</th><th>Activa</th><th></th></tr></thead>
+        <tbody id="tbodyEmp"></tbody>
+      </table></div>
+    </section>
+
     <!-- Clientes -->
     <section id="t-clientes" style="display:none">
       <div class="bar">
         <span style="color:var(--muted);font-size:13px">Empresas a las que ZAS les hace el reparto. Las que tienen tienda Jumpseller reciben pedidos automáticamente.</span>
         <span class="sp"></span>
+        <button class="btn btn-ghost" id="btnSumarRed" onclick="abrirSumarRed()" title="El cliente ya trabaja con otra empresa de la red">🔗 Sumar cliente de la red</button>
         <button class="btn" id="nuevoCliente">+ Nuevo cliente</button>
       </div>
+      <div id="avisoVinculos" style="display:none;margin-bottom:10px;padding:10px 14px;border-radius:10px;font-size:13px;background:#FFF8EC;border:1px solid #F0D9A8"></div>
       <div class="tbl"><table>
         <thead><tr><th>Empresa</th><th>Contacto</th><th>Retiro</th><th>Integración</th><th>Pedidos hoy</th><th></th></tr></thead>
         <tbody id="tbodyCli"></tbody>
@@ -313,6 +355,14 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     <button class="btn-ghost btn" onclick="sb.auth.signOut()">Salir</button>
   </header>
   <main style="max-width:1100px;margin:0 auto;padding:14px">
+    <div class="bar" style="margin-bottom:14px">
+      <button class="chip on" id="empTabPedidos" onclick="empTab('pedidos')">📦 Mis pedidos</button>
+      <button class="chip" id="empTabEmpresas" onclick="empTab('empresas')">🚚 Mis empresas de reparto<span id="empTabN" style="display:none;margin-left:6px;background:#d03b3b;color:#fff;border-radius:99px;font-size:10px;padding:1px 6px;font-weight:700"></span></button>
+    </div>
+
+    <div id="empVistaEmpresas" style="display:none"></div>
+
+    <div id="empVistaPedidos">
     <div class="tiles" id="empTiles"></div>
     <div class="bar" style="margin-top:8px">
       <div id="empChips" style="display:flex;gap:8px;flex-wrap:wrap"></div>
@@ -325,9 +375,27 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       <thead><tr><th>Código</th><th>Cód. envío</th><th>Cliente final</th><th>Dirección</th><th>Comuna</th><th>Estado</th><th>Fecha despacho</th><th></th></tr></thead>
       <tbody id="empTbody"></tbody>
     </table></div>
-    <p style="color:var(--muted);font-size:11.5px;margin-top:10px">Portal de seguimiento de <b>ZAS Reparto</b> — aquí ves solo los pedidos que reparte ZAS para tu empresa, con su estado y prueba de entrega.</p>
+    </div>
+    <p style="color:var(--muted);font-size:11.5px;margin-top:10px">Portal de <b>ZAS Reparto</b> — acá ves tus pedidos, quién te los reparte y con qué reglas.</p>
   </main>
 </div>
+
+<!-- modal: sumar un cliente que ya está en la red -->
+<div class="veil" id="mSumarRed"><div class="modal" style="width:min(520px,94vw)">
+  <h2>🔗 Sumar un cliente de la red</h2>
+  <p style="color:var(--ink-2);font-size:13px;margin:0 0 10px">
+    Si el cliente ya trabaja con otra empresa que usa este sistema, buscalo por su RUT.
+    Le llega una solicitud y <b>él decide</b> si te habilita. Mientras no acepte, no ves nada suyo.
+  </p>
+  <label>RUT del cliente</label>
+  <input id="srRut" placeholder="76.123.456-7">
+  <button class="btn btn-ghost" id="srBuscar" style="margin-top:8px">Buscar</button>
+  <div id="srResultado" style="margin-top:12px;font-size:13px"></div>
+  <div class="err" id="srErr"></div>
+  <div class="foot">
+    <button class="btn btn-ghost" onclick="cerrar('mSumarRed')">Cerrar</button>
+  </div>
+</div></div>
 
 <!-- modal nota de entrega (repartidor) -->
 <div class="veil" id="mNota"><div class="modal" style="width:min(420px,94vw)">
@@ -398,6 +466,12 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     <video id="cqVideo" playsinline style="width:100%;max-width:340px;border-radius:12px;background:#000"></video>
   </div>
   <div id="cqAviso" style="margin-top:12px;padding:10px 12px;border-radius:10px;font-size:13.5px;font-weight:600;background:#f0efec">Elige un repartidor para empezar.</div>
+  <div id="cqCrudo" style="display:none;margin-top:8px;padding:10px 12px;border:1px dashed var(--grid);border-radius:10px">
+    <div style="font-size:11.5px;color:var(--muted);margin-bottom:5px">Esto es lo que traía ese código, tal cual. Cópialo y mándamelo si no reconoce una etiqueta que debería funcionar:</div>
+    <div id="cqCrudoTexto" style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;word-break:break-all;background:#f5f4f1;padding:8px;border-radius:6px;user-select:all"></div>
+    <button class="btn btn-ghost" style="margin-top:6px;padding:3px 10px;font-size:11.5px"
+      onclick="navigator.clipboard.writeText(document.getElementById('cqCrudoTexto').textContent).then(()=>toast('Copiado'))">📋 Copiar</button>
+  </div>
   <div style="display:flex;align-items:center;gap:10px;margin-top:12px">
     <b id="cqContador" style="font-size:15px">0 cargados</b>
     <span class="sp" style="flex:1"></span>
@@ -438,6 +512,39 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
 <div class="veil" id="mDet"><div class="modal" id="mDetBody"></div></div>
 
 <!-- modal cliente -->
+<!-- ============ MODAL: EMPRESA DE REPARTO ============ -->
+<div class="veil" id="mEmpresa"><div class="modal">
+  <h2 id="epTitulo">Nueva empresa de reparto</h2>
+  <p style="color:var(--ink-2);font-size:12.5px;margin:2px 0 10px">
+    Una empresa que usa este sistema para repartir. Entra a esta misma página con su propia cuenta
+    y ve <b>solo</b> lo suyo: sus pedidos, sus repartidores y los clientes que la habilitaron.
+  </p>
+  <label>Nombre *</label><input id="epNombre">
+  <div class="cols">
+    <div><label>RUT</label><input id="epRut"></div>
+    <div><label>Teléfono</label><input id="epTel"></div>
+  </div>
+  <label>Correo de contacto</label><input id="epEmail" type="email">
+  <div id="epCuentaBox" style="display:none;margin-top:12px;padding:14px;background:#eef6ff;border:1px solid #cfe3f7;border-radius:10px">
+    <b style="font-size:13px">👤 Cuenta de administrador de esta empresa</b>
+    <p style="color:var(--ink-2);font-size:12px;margin:6px 0 2px">
+      Con esta cuenta el dueño de la empresa entra al panel, ve el pool, toma pedidos y administra a su propia gente.
+    </p>
+    <div id="epCuentaLista" style="font-size:12px;margin:6px 0"></div>
+    <div class="cols">
+      <div><label>Correo de acceso</label><input id="epCuentaEmail" type="email" autocomplete="off"></div>
+      <div><label>Contraseña</label><input id="epCuentaPass" type="text" autocomplete="off"></div>
+    </div>
+    <div id="epCuentaEstado" style="font-size:12px;margin-top:8px;min-height:16px"></div>
+    <button class="btn" style="margin-top:6px" id="epCuentaCrear">Crear acceso</button>
+  </div>
+  <div class="err" id="epErr"></div>
+  <div class="foot">
+    <button class="btn btn-ghost" onclick="cerrar('mEmpresa')">Cancelar</button>
+    <button class="btn" id="epGuardar">Guardar</button>
+  </div>
+</div></div>
+
 <div class="veil" id="mCliente"><div class="modal">
   <h2 id="cTitulo">Nuevo cliente</h2>
   <label>Nombre de la empresa *</label><input id="cNombre">
@@ -468,6 +575,16 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         <input type="checkbox" data-dia="${i}" style="display:none" onchange="this.parentElement.style.background=this.checked?'#FFF1E8':'';this.parentElement.style.borderColor=this.checked?'var(--brand)':'var(--grid)';this.parentElement.style.fontWeight=this.checked?'700':'400'">${d}
       </label>`).join('');
   </script>
+  <div id="cEmpresasBox" style="display:none;margin-top:12px;padding:14px;background:#f2f7f2;border:1px solid #cfe3cf;border-radius:10px">
+    <b style="font-size:13px">🚚 Empresas de reparto que pueden repartirle</b>
+    <p style="color:var(--ink-2);font-size:12px;margin:6px 0 8px">
+      Marca quiénes ven los pedidos de este cliente. Con <b>una sola</b> marcada, los pedidos le llegan directo.
+      Con <b>dos o más</b>, entran al <b>pool</b> y se los queda la primera que los tome.
+    </p>
+    <div id="cEmpresasLista" style="display:flex;flex-direction:column;gap:6px"></div>
+    <div id="cEmpresasEstado" style="font-size:12px;margin-top:8px;min-height:16px"></div>
+    <div id="cReglasCliente" style="font-size:12px;margin-top:10px;padding-top:10px;border-top:1px dashed #cfe3cf"></div>
+  </div>
   <label>Integración</label>
   <select id="cInteg">
     <option value="manual">Manual (sin tienda online)</option>
@@ -593,6 +710,13 @@ const EST = {
 };
 const FIN = ['entregado','cancelado','no_entregado'];
 let pedidos = [], perfiles = [], clientes = [], filtro = 'activos', busq = '', clienteEditando = null;
+/* ---- POOL / RED DE EMPRESAS DE REPARTO (v1.33) ---- */
+let empresas = [], habilitaciones = [], poolPedidos = [];
+let miEmpresa = null, soySuper = false, HAY_POOL = false;
+/* v1.33: reglas de reparto del cliente y frenos anti-acaparamiento */
+let configRed = { plazo_asignar_min:120, tope_sin_asignar:30 };
+let poolSel = new Set(), poolComunaSel = '', poolBusq = '', empresaEditando = null;
+const empresaDe = id => (empresas.find(e=>e.id===id)||{}).nombre;
 const clienteDe = id => (clientes.find(c=>c.id===id)||{}).nombre;
 const $ = id => document.getElementById(id);
 const esc = s => (s??'').toString().replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -649,6 +773,8 @@ async function manejarSesion(session){
   $('login').style.display='none';
   if(perfil.rol==='admin'){
     adminUid = session.user.id;
+    miEmpresa = perfil.empresa_reparto_id ?? null;
+    soySuper  = perfil.superadmin === true;
     $('who').textContent = perfil.nombre;
     $('app').style.display='block';
     await cargarTodo(); suscribir();
@@ -794,6 +920,7 @@ async function iniciarEmpresa(perfil){
   empNombre = cli?.nombre || 'tu empresa';
   $('empTitulo').textContent = 'Pedidos de '+empNombre;
   await cargarEmpPedidos();
+  revisarInvitaciones();
   if(!empSuscrito){
     empSuscrito = true;
     sb.channel('emp-pedidos').on('postgres_changes',
@@ -838,6 +965,249 @@ function pintarEmp(){
     </tr>`).join('') : '<tr><td colspan="8" class="empty">No hay pedidos con este filtro.</td></tr>';
 }
 window.empFiltrar = k=>{ empFiltro=k; pintarEmp(); };
+
+/* ============================================================
+   v1.33 — EL CLIENTE MANDA: sus empresas de reparto y sus reglas
+   ============================================================ */
+let empRedEmpresas=[], empRedVinculos=[], empRedFicha=null, empRedConfig={plazo_asignar_min:120,tope_sin_asignar:30},
+    empRedConducta=[], empRedVista='pedidos', empRedHay=false;
+
+window.empTab = (cual)=>{
+  empRedVista = cual;
+  $('empVistaPedidos').style.display  = cual==='pedidos'  ? 'block':'none';
+  $('empVistaEmpresas').style.display = cual==='empresas' ? 'block':'none';
+  $('empTabPedidos').classList.toggle('on', cual==='pedidos');
+  $('empTabEmpresas').classList.toggle('on', cual==='empresas');
+  if(cual==='empresas') cargarEmpRed();
+};
+
+async function cargarEmpRed(){
+  if(!empCliId) return;
+  const [e1,e2,e3,e4,e5] = await Promise.all([
+    sb.from('empresas_reparto').select().order('nombre'),
+    sb.from('cliente_empresas').select().eq('cliente_id', empCliId),
+    sb.from('clientes').select().eq('id', empCliId).maybeSingle(),
+    sb.from('config_red').select().maybeSingle(),
+    sb.from('v_empresa_conducta').select().eq('cliente_id', empCliId),
+  ]);
+  empRedHay = !e1.error && !e2.error;
+  empRedEmpresas = e1.data||[]; empRedVinculos = e2.data||[];
+  empRedFicha = e3.data||null; if(e4 && e4.data) empRedConfig = e4.data;
+  empRedConducta = e5.data||[];
+  pintarEmpRed();
+}
+
+/* el globito rojo con las invitaciones que esperan respuesta del cliente */
+async function revisarInvitaciones(){
+  if(!empCliId) return;
+  const { data, error } = await sb.from('cliente_empresas').select().eq('cliente_id', empCliId);
+  if(error) return;
+  empRedVinculos = data||[];
+  const n = empRedVinculos.filter(v=>v.estado==='pendiente' && v.solicitado_por==='empresa').length;
+  const b = $('empTabN');
+  if(b){ b.style.display = n? 'inline-block':'none'; b.textContent = n; }
+}
+
+const empNombreDe = id => (empRedEmpresas.find(e=>e.id===id)||{}).nombre || ('empresa #'+id);
+
+function pintarEmpRed(){
+  const caja = $('empVistaEmpresas');
+  if(!caja) return;
+  if(!empRedHay){
+    caja.innerHTML = '<div class="tbl" style="padding:24px" class="empty">Todavía no está disponible en tu cuenta. Escribinos y lo activamos.</div>';
+    return;
+  }
+  const f = empRedFicha||{};
+  const plazoRed = empRedConfig.plazo_asignar_min, topeRed = empRedConfig.tope_sin_asignar;
+  const plazo = Math.min(f.plazo_asignar_min || plazoRed, plazoRed);
+  const tope  = Math.min(f.tope_sin_asignar  || topeRed,  topeRed);
+
+  const pend = empRedVinculos.filter(v=>v.estado==='pendiente');
+  const activas = empRedVinculos.filter(v=>v.estado==='activa');
+  const sinVinculo = empRedEmpresas.filter(e=>e.activo!==false && !empRedVinculos.some(v=>v.empresa_reparto_id===e.id));
+
+  const tarjeta = (v)=>{
+    const e = empRedEmpresas.find(x=>x.id===v.empresa_reparto_id)||{};
+    const pausada = v.activo===false;
+    return `<div style="border:1px solid var(--border);border-left:5px solid ${esc(e.color||'#999')};border-radius:12px;padding:14px;background:var(--surface);margin-bottom:10px">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <b style="font-size:14px">${esc(e.nombre||'—')}</b>
+        ${pausada?'<span style="background:#FFF4E0;color:#8a6100;border-radius:99px;padding:2px 8px;font-size:11px;font-weight:700">en pausa</span>':'<span style="background:#E7F6E7;color:#006300;border-radius:99px;padding:2px 8px;font-size:11px;font-weight:700">repartiendo</span>'}
+        <span class="sp" style="flex:1"></span>
+        <button class="btn btn-ghost" style="padding:3px 10px;font-size:12px" onclick="empPausar(${v.empresa_reparto_id}, ${pausada})">${pausada?'Reanudar':'Pausar'}</button>
+        <button class="btn btn-ghost" style="padding:3px 10px;font-size:12px;color:#a02222" onclick="empSacar(${v.empresa_reparto_id})">Sacar</button>
+      </div>
+      <div class="cols" style="margin-top:8px">
+        <div>
+          <label style="font-size:12px">Comunas que se lleva <span class="cod">(vacío = cualquiera)</span></label>
+          <input id="reg-com-${v.empresa_reparto_id}" value="${esc((v.comunas||[]).join(', '))}" placeholder="Maipú, Cerrillos">
+        </div>
+        <div>
+          <label style="font-size:12px">Máximo de pedidos al día <span class="cod">(vacío = sin tope)</span></label>
+          <input id="reg-cuo-${v.empresa_reparto_id}" type="number" min="1" value="${v.cuota_diaria??''}">
+        </div>
+      </div>
+      <div class="cols">
+        <div>
+          <label style="font-size:12px">Porcentaje del total <span class="cod">(vacío = no usar)</span></label>
+          <input id="reg-pct-${v.empresa_reparto_id}" type="number" min="0" max="100" value="${v.porcentaje??''}">
+        </div>
+        <div>
+          <label style="font-size:12px">Prioridad <span class="cod">(menor = primero)</span></label>
+          <input id="reg-pri-${v.empresa_reparto_id}" type="number" min="1" value="${v.prioridad??100}">
+        </div>
+      </div>
+      <button class="btn" style="margin-top:8px;padding:5px 14px;font-size:13px" onclick="empGuardarReglas(${v.empresa_reparto_id})">Guardar reglas</button>
+      <span id="reg-est-${v.empresa_reparto_id}" style="font-size:12px;margin-left:8px;color:#006300"></span>
+    </div>`;
+  };
+
+  const cond = empRedConducta.length ? `
+    <div class="tbl" style="margin-top:16px"><table>
+      <thead><tr><th>Empresa</th><th>Pedidos</th><th>Entregados</th><th>No entregados</th><th>Devoluciones</th><th>Tarda en asignar</th></tr></thead>
+      <tbody>${empRedConducta.map(c=>`<tr>
+        <td><b>${esc(empNombreDe(c.empresa_reparto_id))}</b></td>
+        <td>${c.pedidos}</td><td>${c.entregados}</td><td>${c.no_entregados}</td>
+        <td>${c.devoluciones||0}</td>
+        <td>${c.min_promedio_asignar!=null? c.min_promedio_asignar+' min' : '<span class="cod">—</span>'}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>` : '';
+
+  caja.innerHTML = `
+    ${pend.length ? `<div style="background:#FFF8EC;border:1px solid #F0D9A8;border-radius:12px;padding:14px;margin-bottom:12px">
+      <b style="font-size:13.5px">📨 ${pend.length===1?'Una empresa quiere':'Empresas que quieren'} trabajar con vos</b>
+      <div style="margin-top:8px;display:flex;flex-direction:column;gap:8px">
+      ${pend.map(v=>`<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:13px">
+        <b>${esc(empNombreDe(v.empresa_reparto_id))}</b>
+        <span class="cod">${v.solicitado_por==='empresa'?'te mandó una solicitud':'esperando que ella acepte tu invitación'}</span>
+        <span class="sp" style="flex:1"></span>
+        ${v.solicitado_por==='empresa'?`
+          <button class="btn" style="padding:3px 12px;font-size:12px" onclick="empResponder(${v.empresa_reparto_id},true)">Aceptar</button>
+          <button class="btn btn-ghost" style="padding:3px 12px;font-size:12px;color:#a02222" onclick="empResponder(${v.empresa_reparto_id},false)">Rechazar</button>`
+          :`<button class="btn btn-ghost" style="padding:3px 12px;font-size:12px;color:#a02222" onclick="empSacar(${v.empresa_reparto_id})">Cancelar invitación</button>`}
+      </div>`).join('')}
+      </div></div>` : ''}
+
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:14px">
+      <b style="font-size:14px">¿Cómo querés que se repartan tus pedidos?</b>
+      <div style="display:flex;gap:16px;margin-top:10px;flex-wrap:wrap">
+        <label style="display:flex;gap:7px;align-items:flex-start;margin:0;cursor:pointer;max-width:330px">
+          <input type="radio" name="modoRep" value="reglas" ${f.modo_reparto!=='pool'?'checked':''} onchange="empGuardarModo('reglas')" style="width:auto;margin-top:3px">
+          <span style="font-size:13px"><b>Por mis reglas</b><br><span class="cod">Cada empresa se lleva lo que le asignaste. Lo que no calza con nadie cae al pool y lo toma quien quiera.</span></span>
+        </label>
+        <label style="display:flex;gap:7px;align-items:flex-start;margin:0;cursor:pointer;max-width:330px">
+          <input type="radio" name="modoRep" value="pool" ${f.modo_reparto==='pool'?'checked':''} onchange="empGuardarModo('pool')" style="width:auto;margin-top:3px">
+          <span style="font-size:13px"><b>Pool libre</b><br><span class="cod">Todos tus pedidos quedan a la vista de tus empresas y se los lleva la primera que los tome.</span></span>
+        </label>
+      </div>
+
+      <div style="border-top:1px dashed var(--grid);margin-top:14px;padding-top:12px">
+        <b style="font-size:13px">Para que nadie tome pedidos que no va a repartir</b>
+        <div class="cols" style="margin-top:6px">
+          <div>
+            <label style="font-size:12px">Minutos para asignarle repartidor</label>
+            <input id="empPlazo" type="number" min="10" max="${plazoRed}" value="${plazo}">
+            <span class="cod">Máximo permitido: ${plazoRed}. Pasado ese rato el pedido vuelve al pool.</span>
+          </div>
+          <div>
+            <label style="font-size:12px">Máximo de pedidos tomados sin repartidor</label>
+            <input id="empTope" type="number" min="1" max="${topeRed}" value="${tope}">
+            <span class="cod">Máximo permitido: ${topeRed}. Con esa cantidad sin asignar no puede tomar más.</span>
+          </div>
+        </div>
+        <button class="btn" style="margin-top:10px;padding:5px 14px;font-size:13px" onclick="empGuardarFrenos()">Guardar</button>
+        <span id="empFrenosEst" style="font-size:12px;margin-left:8px;color:#006300"></span>
+      </div>
+    </div>
+
+    <b style="font-size:14px">Tus empresas de reparto</b>
+    <div style="margin-top:10px">
+      ${activas.length ? activas.map(tarjeta).join('') :
+        '<div style="padding:24px;text-align:center;color:var(--muted);border:1px dashed var(--grid);border-radius:12px">Todavía no tenés ninguna empresa repartiendo. Sumá una acá abajo.</div>'}
+    </div>
+    ${activas.length>1 && f.modo_reparto!=='pool' ? `<div style="font-size:12.5px;color:var(--ink-2);margin:4px 0 12px">
+      💡 Si dos empresas calzan igual para una comuna y no pusiste porcentajes ni prioridades, el pedido cae al pool y se lo lleva la que lo tome primero.
+    </div>`:''}
+
+    ${sinVinculo.length ? `<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px;margin-top:6px">
+      <b style="font-size:13px">Sumar otra empresa</b>
+      <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;align-items:center">
+        <select id="empNueva" style="max-width:280px">${sinVinculo.map(e=>`<option value="${e.id}">${esc(e.nombre)}</option>`).join('')}</select>
+        <button class="btn" onclick="empInvitar()">Invitar</button>
+        <span class="cod">Le llega la invitación y ella decide si acepta.</span>
+      </div>
+      <div id="empInvEst" style="font-size:12px;margin-top:6px"></div>
+    </div>` : ''}
+
+    ${cond}`;
+}
+
+window.empGuardarModo = async (modo)=>{
+  const { error } = await sb.from('clientes').update({ modo_reparto: modo }).eq('id', empCliId);
+  if(error){ toast('⚠️ '+error.message); return; }
+  toast(modo==='pool' ? '✅ Ahora todo va al pool' : '✅ Ahora se reparte por tus reglas');
+  await cargarEmpRed();
+};
+
+window.empGuardarFrenos = async ()=>{
+  const plazo = Number($('empPlazo').value), tope = Number($('empTope').value);
+  const { error } = await sb.from('clientes')
+    .update({ plazo_asignar_min: plazo||null, tope_sin_asignar: tope||null }).eq('id', empCliId);
+  const est = $('empFrenosEst');
+  if(error){ est.style.color='#d03b3b'; est.textContent = error.message; return; }
+  est.style.color='#006300'; est.textContent='Guardado ✓';
+  setTimeout(()=>{ est.textContent=''; }, 2500);
+  await cargarEmpRed();
+};
+
+window.empGuardarReglas = async (empId)=>{
+  const comunas = $('reg-com-'+empId).value.split(',').map(x=>x.trim()).filter(Boolean);
+  const cuota = $('reg-cuo-'+empId).value, pct = $('reg-pct-'+empId).value, pri = $('reg-pri-'+empId).value;
+  const est = $('reg-est-'+empId);
+  const { error } = await sb.from('cliente_empresas').update({
+    comunas, cuota_diaria: cuota?Number(cuota):null,
+    porcentaje: pct===''?null:Number(pct), prioridad: pri?Number(pri):100,
+  }).eq('cliente_id', empCliId).eq('empresa_reparto_id', empId);
+  if(error){ est.style.color='#d03b3b'; est.textContent = error.message; return; }
+  est.style.color='#006300'; est.textContent='Guardado ✓';
+  setTimeout(()=>{ est.textContent=''; }, 2500);
+  await cargarEmpRed();
+};
+
+window.empPausar = async (empId, reanudar)=>{
+  const { error } = await sb.from('cliente_empresas').update({ activo: !!reanudar })
+    .eq('cliente_id', empCliId).eq('empresa_reparto_id', empId);
+  if(error){ toast('⚠️ '+error.message); return; }
+  toast(reanudar? '▶️ Vuelve a repartirte' : '⏸️ En pausa: no le entran pedidos nuevos');
+  await cargarEmpRed();
+};
+
+window.empSacar = async (empId)=>{
+  if(!confirm('¿Sacar a esta empresa? Deja de ver tus pedidos nuevos. Los que ya tiene en camino los termina.')) return;
+  const { error } = await sb.from('cliente_empresas').delete()
+    .eq('cliente_id', empCliId).eq('empresa_reparto_id', empId);
+  if(error){ toast('⚠️ '+error.message); return; }
+  toast('Listo, ya no te reparte');
+  await cargarEmpRed();
+};
+
+window.empResponder = async (empId, aceptar)=>{
+  const { data, error } = await sb.rpc('responder_vinculo',
+    { p_cliente_id: empCliId, p_empresa_id: empId, p_aceptar: aceptar });
+  if(error){ toast('⚠️ '+error.message); return; }
+  toast(data?.mensaje || 'Listo');
+  await cargarEmpRed(); await revisarInvitaciones();
+};
+
+window.empInvitar = async ()=>{
+  const id = Number($('empNueva').value);
+  const { data, error } = await sb.rpc('invitar_empresa', { p_empresa_id: id });
+  const est = $('empInvEst');
+  if(error){ est.style.color='#d03b3b'; est.textContent = error.message; return; }
+  est.style.color='#006300'; est.textContent = data?.mensaje || 'Invitación enviada';
+  await cargarEmpRed();
+};
+
 window.copiarSeguimientoEmp = (id)=>{
   const p = empPedidos.find(x=>x.id===id); if(!p?.token_seguimiento) return;
   navigator.clipboard.writeText(`https://edesgarceaux-dev.github.io/zas-reparto/seguimiento.html?p=${encodeURIComponent(p.codigo||'')}&t=${p.token_seguimiento}`);
@@ -1247,9 +1617,14 @@ async function cqProcesar(texto){
 
   const p = buscarPedidoPorEtiqueta(t);
   if(!p){
+    // mostramos el contenido crudo: es la única forma de saber qué trae
+    // realmente una etiqueta que no calza (sirve para diagnosticar Flex)
     cqAviso('❌ No encontré ningún pedido con esa etiqueta', 'err');
+    $('cqCrudo').style.display = 'block';
+    $('cqCrudoTexto').textContent = t;
     cqBip(false); return;
   }
+  $('cqCrudo').style.display = 'none';
   if(p.repartidor_id === rep){
     cqAviso('Ya estaba cargado a ' + nombreDe(rep) + ' · ' + (p.codigo||'#'+p.id), 'warn');
     cqBip(false); return;
@@ -1281,6 +1656,7 @@ window.abrirCargaQr = ()=>{
     perfiles.filter(r=>r.activo && r.rol!=='empresa')
       .map(r=>`<option value="${r.id}">${esc(r.nombre)}${r.rol==='admin'?' (admin)':''}</option>`).join('');
   $('cqEntrada').value = '';
+  $('cqCrudo').style.display = 'none';
   cqAviso('Elige un repartidor y empieza a escanear.', 'info');
   cqPintar();
   $('mCargaQr').classList.add('on');
@@ -1668,13 +2044,43 @@ window.imprimirManifiesto = ()=>{
 
 /* ---------- DATOS ---------- */
 async function cargarTodo(){
-  const [p1,p2,p3] = await Promise.all([
+  // si hay pedidos tomados y sin repartidor a los que se les pasó la hora,
+  // vuelven solos al pool antes de que miremos nada
+  try { await sb.rpc('liberar_vencidos'); } catch(_){}
+  const [p1,p2,p3,p4,p5,p6] = await Promise.all([
     sb.from('perfiles').select().order('nombre'),
     sb.from('pedidos').select().order('creado_en',{ascending:false}).limit(1000),
     sb.from('clientes').select().order('nombre'),
+    sb.from('empresas_reparto').select().order('nombre'),
+    sb.from('cliente_empresas').select(),
+    sb.from('config_red').select().maybeSingle(),
   ]);
-  perfiles = p1.data||[]; pedidos = p2.data||[]; clientes = p3.data||[];
+  perfiles = p1.data||[]; clientes = p3.data||[];
+  empresas = p4.data||[]; habilitaciones = p5.data||[];
+  if(p6 && p6.data) configRed = p6.data;
+  // ¿ya está corrida la migración del pool? (si no, todo sigue como antes)
+  HAY_POOL = !p4.error && (p2.data||[]).some(p=>'empresa_reparto_id' in p);
+  repartirPedidos(p2.data||[]);
+  $('navPool').style.display     = HAY_POOL ? '' : 'none';
+  $('navEmpresas').style.display = (HAY_POOL && soySuper) ? '' : 'none';
+  if($('navMaestro')) $('navMaestro').style.display = soySuper ? '' : 'none';
+  if($('btnSumarRed')) $('btnSumarRed').style.display = HAY_POOL ? '' : 'none';
   pintar();
+}
+
+/* separa lo que ya es de mi empresa de lo que sigue libre en el pool */
+function repartirPedidos(todos){
+  if(!HAY_POOL){ pedidos = todos; poolPedidos = []; return; }
+  pedidos     = todos.filter(p=>p.empresa_reparto_id != null);
+  poolPedidos = todos.filter(p=>p.empresa_reparto_id == null);
+}
+/* mete un pedido que llegó por tiempo real en la lista que le toca */
+const porFecha = (a,b)=> String(b.creado_en||'').localeCompare(String(a.creado_en||''));
+function ubicarPedido(row){
+  pedidos     = pedidos.filter(p=>p.id!==row.id);
+  poolPedidos = poolPedidos.filter(p=>p.id!==row.id);
+  if(HAY_POOL && row.empresa_reparto_id == null){ poolPedidos.push(row); poolPedidos.sort(porFecha); }
+  else { pedidos.push(row); pedidos.sort(porFecha); }
 }
 let yaSuscrito = false;
 function suscribir(){
@@ -1682,9 +2088,18 @@ function suscribir(){
   yaSuscrito = true;
   sb.channel('cambios')
     .on('postgres_changes',{event:'*',schema:'public',table:'pedidos'}, payload=>{
-      if(payload.eventType==='INSERT') pedidos.unshift(payload.new);
-      else if(payload.eventType==='UPDATE'){ const i=pedidos.findIndex(p=>p.id===payload.new.id); if(i>=0) pedidos[i]=payload.new; else pedidos.unshift(payload.new); }
-      else if(payload.eventType==='DELETE') pedidos = pedidos.filter(p=>p.id!==payload.old.id);
+      if(payload.eventType==='DELETE'){
+        pedidos = pedidos.filter(p=>p.id!==payload.old.id);
+        poolPedidos = poolPedidos.filter(p=>p.id!==payload.old.id);
+      } else {
+        // si otra empresa lo tomó, se va del pool solo (y avisamos si lo tenía marcado)
+        if(HAY_POOL && payload.eventType==='UPDATE' && poolSel.has(payload.new.id)
+           && payload.new.empresa_reparto_id != null){
+          poolSel.delete(payload.new.id);
+          poolAviso(`Se te adelantaron: ${payload.new.codigo||'#'+payload.new.id} ya lo tomó ${empresaDe(payload.new.empresa_reparto_id)||'otra empresa'}.`, 'aviso');
+        }
+        ubicarPedido(payload.new);
+      }
       pintar();
     }).subscribe();
 }
@@ -1692,6 +2107,7 @@ function suscribir(){
 /* ---------- PINTAR ---------- */
 function pintar(){
   pintarTiles(); pintarPedidos(); pintarRendimiento(); pintarReps(); pintarClientes();
+  if(HAY_POOL){ pintarPool(); pintarEmpresas(); pintarReloj(); pintarVinculosPendientes(); }
   if(mapa && $('t-mapa').style.display!=='none'){ poblarSelectorRuta(); dibujarRuta(); }
 }
 
@@ -1900,6 +2316,7 @@ function actualizarWebhookBox(){
   $('cMeli').style.display = clienteEditando ? 'block' : 'none';
   $('cPortal').style.display = clienteEditando ? 'block' : 'none';
   if(clienteEditando){ $('cPortalEstado').textContent=''; pintarPortalLista(); }
+  pintarEmpresasDelCliente();
 }
 function pintarPortalLista(){
   const cuentas = perfiles.filter(p=>p.rol==='empresa' && p.cliente_id===clienteEditando);
@@ -2103,6 +2520,9 @@ window.verDetalle = async (id)=>{
         ? (p.envio_id ? p.envio_id : '⚠️ falta — la app no puede escanear esta etiqueta')
         : null],
     ['Repartidor',p.repartidor_id?nombreDe(p.repartidor_id):'Sin asignar'],
+    ['Empresa de reparto', HAY_POOL && soySuper && p.empresa_reparto_id
+        ? (empresaDe(p.empresa_reparto_id)||'') + (p.tomado_en? ' — tomado el '+fechaHora(p.tomado_en) : '')
+        : null],
     ['Motivo no entrega',p.motivo_no_entrega],['Nota entrega',p.nota_entrega],
   ].filter(([,v])=>v).map(([k,v])=>`<div class="row"><b>${k}</b><span>${esc(v)}</span></div>`).join('');
   $('mDetBody').innerHTML = `
@@ -2143,7 +2563,11 @@ window.verDetalle = async (id)=>{
         <button class="btn btn-ghost" onclick="cambiarEstado(${p.id},'en_camino')">⏪ Volver a "En camino"</button>
         <button class="btn btn-ghost" onclick="reintentar(${p.id})">♻️ Volver a pendiente (sin repartidor)</button>`:''}
       ${p.estado==='no_entregado'?`<button class="btn btn-ghost" onclick="cambiarEstado(${p.id},'en_camino')">⏪ Volver a "En camino"</button>`:''}
+      ${HAY_POOL && p.empresa_reparto_id && (['pendiente','asignado'].includes(p.estado) || (soySuper && !FIN.includes(p.estado)))
+        ? `<button class="btn btn-ghost" style="color:#8a6100;border-color:#e0cf9a" title="Lo suelta para que lo pueda tomar otra empresa" onclick="devolverAlPool(${p.id})">📤 Devolver al pool${soySuper && !['pendiente','asignado'].includes(p.estado)?' (forzar)':''}</button>`:''}
     </div>
+    ${HAY_POOL && p.empresa_reparto_id && !['pendiente','asignado'].includes(p.estado) && !FIN.includes(p.estado)
+      ? `<div class="cod" style="margin-top:6px">Ya va en ruta${soySuper?': solo tú puedes forzar la devolución.':': no se puede devolver al pool.'}</div>` : ''}
     ${prueba ? `
     <div style="margin-top:14px;padding:14px;background:#f2faf2;border:1px solid #cde8cd;border-radius:12px">
       <b style="font-size:13px;color:#0a6b0a">✅ Prueba de entrega</b>
@@ -2225,6 +2649,7 @@ $('rGuardar').onclick = async ()=>{
     await new Promise(r=>setTimeout(r, 800));
     const extra = { telefono:$('rTel').value.trim()||null, correo:e };
     if($('rDir').value.trim()) extra.direccion = $('rDir').value.trim();
+    if(HAY_POOL && miEmpresa) extra.empresa_reparto_id = miEmpresa;  // queda en MI empresa
     let { error: e2 } = await sb.from('perfiles').update(extra).eq('id', data.user.id);
     if(e2 && /column/i.test(e2.message)){
       await sb.from('perfiles').update({ telefono: extra.telefono }).eq('id', data.user.id);
@@ -2270,14 +2695,406 @@ $('eGuardar').onclick = async ()=>{
 
 /* búsqueda (los chips de filtro se generan dinámicamente en pintarChips) */
 $('buscar').oninput = e=>{ busq = e.target.value; pintarPedidos(); };
+$('poolBuscar').oninput = e=>{ poolBusq = e.target.value; pintarPool(); };
+
+/* ============================================================
+   POOL DE PEDIDOS  (v1.33)
+   Pedidos sin dueño. El primero que los toma se los queda.
+   ============================================================ */
+function poolAviso(txt, tipo){
+  const c = $('poolAviso'); if(!c) return;
+  const col = tipo==='ok'    ? ['#eef8ee','#bfe0bf','#006300']
+            : tipo==='aviso' ? ['#fff8e6','#f0e0b0','#8a6100']
+                             : ['#fdeeee','#f3c9c9','#a11'];
+  c.style.display='block'; c.style.background=col[0];
+  c.style.border='1px solid '+col[1]; c.style.color=col[2];
+  c.innerHTML = txt;
+}
+window.poolFiltrarComuna = v => { poolComunaSel = v; pintarPool(); };
+window.poolLimpiar = ()=>{ poolSel.clear(); if($('poolTodos')) $('poolTodos').checked=false; pintarPool(); };
+window.poolAlternar = (id, v)=>{ v ? poolSel.add(id) : poolSel.delete(id); pintarPool(); };
+window.poolSeleccionarTodos = v =>{
+  poolListaVisible().forEach(p=> v ? poolSel.add(p.id) : poolSel.delete(p.id));
+  pintarPool();
+};
+
+function poolListaVisible(){
+  const q = poolBusq.toLowerCase();
+  return poolPedidos.filter(p=>{
+    if(poolComunaSel && (p.comuna||'') !== poolComunaSel) return false;
+    if(!q) return true;
+    return [p.codigo,p.externo_id||'',p.cliente_nombre,p.direccion,p.comuna,clienteDe(p.cliente_id)||'']
+      .join(' ').toLowerCase().includes(q);
+  });
+}
+
+function pintarPool(){
+  const n = poolPedidos.length;
+  const badge = $('poolN');
+  if(badge){ badge.style.display = n ? 'inline-block' : 'none'; badge.textContent = n; }
+  if(!$('tbodyPool')) return;
+
+  // selector de comunas
+  const comunas = [...new Set(poolPedidos.map(p=>p.comuna).filter(Boolean))].sort();
+  const sel = $('poolComuna');
+  if(sel && sel.dataset.firma !== comunas.join('|')){
+    sel.dataset.firma = comunas.join('|');
+    sel.innerHTML = '<option value="">Todas las comunas</option>' +
+      comunas.map(c=>`<option value="${esc(c)}">${esc(c)} (${poolPedidos.filter(p=>p.comuna===c).length})</option>`).join('');
+    sel.value = poolComunaSel;
+  }
+
+  const lista = poolListaVisible();
+  $('tbodyPool').innerHTML = lista.length ? lista.map(p=>`
+    <tr>
+      <td onclick="event.stopPropagation()"><input type="checkbox" ${poolSel.has(p.id)?'checked':''} onchange="poolAlternar(${p.id}, this.checked)"></td>
+      <td class="cod">${esc(p.codigo||'#'+p.id)}${p.origen==='jumpseller'?' <span style="color:#1baf7a" title="Jumpseller">⚡</span>':''}${p.origen==='mercadolibre'?' <span style="color:#3483fa;font-weight:800" title="MercadoLibre Flex">Ⓜ</span>':''}</td>
+      <td>${p.cliente_id? esc(clienteDe(p.cliente_id)||'…') : '<span class="cod">—</span>'}</td>
+      <td><b>${esc(p.cliente_nombre)}</b></td>
+      <td>${esc(p.direccion)}</td>
+      <td>${p.comuna? esc(p.comuna) : '<span class="cod">—</span>'}</td>
+      <td style="font-size:12px;color:var(--ink-2);max-width:230px">${esc(p.asignacion_motivo||'—')}</td>
+      <td class="cod">${fechaHora(p.creado_en)}</td>
+      <td><button class="btn" style="padding:4px 12px;background:#0CA30C;border-color:#0CA30C" onclick="tomarDelPool([${p.id}])">✋ Tomar</button></td>
+    </tr>`).join('')
+    : `<tr><td colspan="9" class="empty">${n? 'Ningún pedido del pool calza con este filtro.' : 'El pool está vacío: no hay pedidos esperando dueño.'}</td></tr>`;
+
+  pintarReglasPool();
+
+  const marcados = lista.filter(p=>poolSel.has(p.id)).length;
+  const barra = $('poolBarra');
+  if(barra){
+    barra.style.display = marcados ? 'flex' : 'none';
+    $('poolSelN').textContent = marcados===1 ? '1 pedido marcado' : marcados+' pedidos marcados';
+    $('poolTomar').textContent = poolComunaSel && marcados===lista.length
+      ? `✋ Tomar los ${marcados} de ${poolComunaSel}` : '✋ Tomar seleccionados';
+  }
+  const todos = $('poolTodos');
+  if(todos) todos.checked = lista.length>0 && marcados===lista.length;
+}
+
+window.tomarSeleccionados = ()=> tomarDelPool([...poolSel]);
+
+window.tomarDelPool = async (ids)=>{
+  if(!ids || !ids.length) return;
+  const btns = document.querySelectorAll('#t-pool button');
+  btns.forEach(b=>b.disabled=true);
+  const { data, error } = await sb.rpc('tomar_pedidos', { p_ids: ids });
+  btns.forEach(b=>b.disabled=false);
+  if(error){
+    poolAviso(/function|does not exist|schema cache/i.test(error.message)
+      ? 'Falta correr <b>migracion-red-empresas.sql</b> en el SQL Editor de Supabase.'
+      : 'No se pudo tomar: '+esc(error.message), 'error');
+    return;
+  }
+  ids.forEach(i=>poolSel.delete(i));
+  const t = data?.tomados || 0;
+  const fallos = data?.no_pudo || [];
+  let msg = t ? `<b>✅ Tomaste ${t} ${t===1?'pedido':'pedidos'}.</b> Ya son tuyos: ninguna otra empresa los ve.` : '';
+  if(fallos.length){
+    msg += (msg?'<br>':'') + `<b>${fallos.length} no se ${fallos.length===1?'pudo':'pudieron'}:</b> ` +
+      fallos.map(f=>`#${f.id} — ${esc(f.motivo)}`).join(' · ');
+  }
+  poolAviso(msg || 'No se pudo tomar ninguno.', t ? (fallos.length?'aviso':'ok') : 'error');
+  if(t) toast(`Tomaste ${t} ${t===1?'pedido':'pedidos'}`);
+  await cargarTodo();
+};
+
+window.devolverAlPool = async (id)=>{
+  if(!confirm('¿Devolver este pedido al pool? Queda libre para que lo tome otra empresa.')) return;
+  const { data, error } = await sb.rpc('devolver_pedidos', { p_ids:[id], p_nota:null });
+  if(error){ toast('Error: '+error.message); return; }
+  if(data?.devueltos){ cerrar('mDet'); toast('Pedido devuelto al pool'); }
+  else toast((data?.no_pudo?.[0]?.motivo) ? 'No se puede: '+data.no_pudo[0].motivo : 'No se pudo devolver');
+  await cargarTodo();
+};
+
+/* ============================================================
+   v1.33 — FRENOS ANTI-ACAPARAMIENTO Y REGLAS DEL CLIENTE
+   ============================================================ */
+
+/* el tope y el plazo que le corresponden a un cliente:
+   siempre gana el más estricto entre lo que puso él y el piso de la red */
+function limitesDe(clienteId){
+  const c = clientes.find(x=>x.id===clienteId) || {};
+  const plazo = Math.min(c.plazo_asignar_min || configRed.plazo_asignar_min, configRed.plazo_asignar_min);
+  const tope  = Math.min(c.tope_sin_asignar  || configRed.tope_sin_asignar,  configRed.tope_sin_asignar);
+  return { plazo, tope };
+}
+
+/* cuántos tenés tomados sin repartidor, por cliente */
+function tomadosSinAsignar(clienteId){
+  return pedidos.filter(p=>p.cliente_id===clienteId && p.estado==='pendiente' && !p.repartidor_id).length;
+}
+
+/* minutos que faltan para que un pedido vuelva solo al pool */
+function minutosRestantes(p){
+  if(!p || !p.vence_asignacion_en) return null;
+  return Math.round((new Date(p.vence_asignacion_en) - new Date())/60000);
+}
+
+/* aviso arriba de Pedidos: a cuáles se les está por vencer el plazo */
+function pintarReloj(){
+  const caja = $('avisoReloj');
+  if(!caja) return;
+  const conReloj = pedidos.filter(p=>p.vence_asignacion_en && !p.repartidor_id && p.estado==='pendiente');
+  if(!conReloj.length){ caja.style.display='none'; return; }
+  const urgentes = conReloj.filter(p=>{ const m = minutosRestantes(p); return m!==null && m <= 30; });
+  const vencidos = conReloj.filter(p=>{ const m = minutosRestantes(p); return m!==null && m <= 0; });
+  caja.style.display='block';
+  caja.innerHTML = vencidos.length
+    ? `<b>⏰ ${vencidos.length} ${vencidos.length===1?'pedido volvió':'pedidos volvieron'} al pool</b> por no tener repartidor a tiempo. Actualizá la página para verlo.`
+    : urgentes.length
+      ? `<b>⏳ ${urgentes.length} ${urgentes.length===1?'pedido está':'pedidos están'} por vencerse:</b> si no les asignás repartidor, vuelven al pool y otra empresa se los puede llevar.`
+      : `⏳ Tenés <b>${conReloj.length}</b> ${conReloj.length===1?'pedido sin repartidor':'pedidos sin repartidor'}. Tenés hasta ${configRed.plazo_asignar_min} minutos desde que entraron para asignarlos.`;
+}
+
+/* aviso arriba del pool: cuánto podés llevarte todavía */
+function pintarReglasPool(){
+  const caja = $('poolReglas');
+  if(!caja) return;
+  const ids = [...new Set(poolPedidos.map(p=>p.cliente_id).filter(Boolean))];
+  if(!ids.length){ caja.style.display='none'; return; }
+  const partes = ids.map(id=>{
+    const { tope, plazo } = limitesDe(id);
+    const usado = tomadosSinAsignar(id);
+    const libre = Math.max(0, tope - usado);
+    const nom = clienteDe(id) || 'ese cliente';
+    return libre === 0
+      ? `<b>${esc(nom)}</b>: llegaste al tope (${tope} sin repartidor). Asigná los que tenés y volvé.`
+      : `<b>${esc(nom)}</b>: te podés llevar ${libre} más y tenés ${plazo} min para asignarles repartidor.`;
+  });
+  caja.style.display='block';
+  caja.innerHTML = '⚖️ ' + partes.join(' · ') +
+    '<br><span style="opacity:.75">Los pedidos tomados y sin repartidor vuelven solos al pool cuando se pasa el plazo. Es para que nadie tome más de lo que va a repartir.</span>';
+}
+
+/* solicitudes de vínculo esperando respuesta */
+function pintarVinculosPendientes(){
+  const caja = $('avisoVinculos');
+  if(!caja) return;
+  const mias = habilitaciones.filter(v=>v.estado==='pendiente' && v.empresa_reparto_id===miEmpresa);
+  const meToca = mias.filter(v=>v.solicitado_por==='cliente');
+  const esperando = mias.filter(v=>v.solicitado_por==='empresa');
+  if(!mias.length){ caja.style.display='none'; return; }
+  caja.style.display='block';
+  const nom = id => clienteDe(id) || ('cliente #'+id);
+  caja.innerHTML =
+    (meToca.length ? `<b>📨 Te invitaron a repartir:</b><div style="margin-top:6px;display:flex;flex-direction:column;gap:6px">` +
+      meToca.map(v=>`<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span>${esc(nom(v.cliente_id))}</span><span class="sp" style="flex:1"></span>
+        <button class="btn btn-ghost" style="padding:2px 9px;font-size:12px" onclick="responderVinculo(${v.cliente_id},true)">Aceptar</button>
+        <button class="btn btn-ghost" style="padding:2px 9px;font-size:12px;color:#a02222" onclick="responderVinculo(${v.cliente_id},false)">Rechazar</button>
+      </div>`).join('') + '</div>' : '') +
+    (esperando.length ? `<div style="margin-top:${meToca.length?'8px':'0'}">⏳ Esperando que ${esperando.length===1?'acepte':'acepten'}: ` +
+      esperando.map(v=>esc(nom(v.cliente_id))).join(', ') + '</div>' : '');
+}
+
+window.responderVinculo = async (clienteId, aceptar)=>{
+  const { data, error } = await sb.rpc('responder_vinculo',
+    { p_cliente_id:clienteId, p_empresa_id:miEmpresa, p_aceptar:aceptar });
+  if(error){ toast('⚠️ '+error.message); return; }
+  toast(data?.mensaje || 'Listo');
+  await cargarTodo();
+};
+
+/* ---- sumar un cliente que ya está en la red ---- */
+window.abrirSumarRed = ()=>{
+  $('srRut').value=''; $('srResultado').innerHTML=''; $('srErr').textContent='';
+  $('mSumarRed').classList.add('on');
+  setTimeout(()=>$('srRut').focus(), 60);
+};
+window.buscarEnLaRed = async ()=>{
+  const rut = $('srRut').value.trim();
+  $('srErr').textContent=''; $('srResultado').innerHTML='';
+  if(!rut){ $('srErr').textContent='Escribí el RUT del cliente.'; return; }
+  $('srBuscar').disabled = true;
+  const { data, error } = await sb.rpc('buscar_cliente_red', { p_rut: rut });
+  $('srBuscar').disabled = false;
+  if(error){ $('srErr').textContent = error.message; return; }
+  if(!data || !data.existe){
+    $('srResultado').innerHTML = '<span style="color:var(--ink-2)">Ese RUT no está en la red. Si es un cliente nuevo, cargalo con <b>+ Nuevo cliente</b>.</span>';
+    return;
+  }
+  const yaEs = data.vinculo === 'activa';
+  const pend = data.vinculo === 'pendiente';
+  $('srResultado').innerHTML = `
+    <div style="padding:12px;border:1px solid var(--grid);border-radius:10px">
+      <b>${esc(data.nombre)}</b>${data.comuna?` <span class="cod">· ${esc(data.comuna)}</span>`:''}
+      <div style="margin-top:8px">${
+        yaEs ? '<span style="color:#006300">✅ Ya trabajás con este cliente.</span>'
+        : pend ? '<span style="color:#8a6100">⏳ Ya le mandaste una solicitud. Falta que la acepte.</span>'
+        : `<button class="btn" onclick="pedirCliente(${data.id})">📨 Pedirle trabajar con él</button>`
+      }</div>
+    </div>`;
+};
+window.pedirCliente = async (id)=>{
+  const { data, error } = await sb.rpc('solicitar_cliente', { p_cliente_id:id });
+  if(error){ $('srErr').textContent = error.message; return; }
+  $('srResultado').innerHTML = `<span style="color:#006300">✅ ${esc(data?.mensaje||'Solicitud enviada')}</span>`;
+  await cargarTodo();
+};
+
+/* refresco del pool mientras la pestaña está abierta:
+   si otra empresa se lleva un pedido, a veces el aviso en vivo no llega
+   (deja de ser visible para nosotros), así que lo comprobamos cada tanto */
+setInterval(()=>{
+  if(HAY_POOL && $('t-pool') && $('t-pool').style.display!=='none' && !document.hidden) cargarTodo();
+}, 45000);
+
+/* ============================================================
+   EMPRESAS DE REPARTO  (solo super-admin)
+   ============================================================ */
+function pintarEmpresas(){
+  if(!$('tbodyEmp') || !soySuper) return;
+  const hoy = hoyStr();
+  $('tbodyEmp').innerHTML = empresas.length ? empresas.map(e=>{
+    const gente = perfiles.filter(p=>p.empresa_reparto_id===e.id).length;
+    const clis  = habilitaciones.filter(h=>h.empresa_reparto_id===e.id && h.activo!==false).length;
+    const hoyN  = pedidos.filter(p=>p.empresa_reparto_id===e.id && p.fecha_pedido===hoy).length;
+    return `<tr style="cursor:default">
+      <td><b>${esc(e.nombre)}</b>${e.rut?`<br><span class="cod">${esc(e.rut)}</span>`:''}${e.id===miEmpresa?' <span class="st" style="color:#0CA30C;font-size:11px">la tuya</span>':''}</td>
+      <td>${esc(e.telefono||'—')}${e.email?`<br><span class="cod">${esc(e.email)}</span>`:''}</td>
+      <td>${gente}</td>
+      <td>${clis}</td>
+      <td>${hoyN}</td>
+      <td>${e.activo?'✅':'⛔'}</td>
+      <td><button class="btn btn-ghost" onclick="editarEmpresa(${e.id})">Editar</button></td>
+    </tr>`;
+  }).join('') : '<tr><td colspan="7" class="empty">Aún no hay empresas de reparto.</td></tr>';
+}
+
+window.editarEmpresa = id => abrirModalEmpresa(empresas.find(e=>e.id===id));
+function abrirModalEmpresa(e){
+  empresaEditando = e ? e.id : null;
+  $('epTitulo').textContent = e ? 'Editar empresa de reparto' : 'Nueva empresa de reparto';
+  $('epNombre').value = e?.nombre||''; $('epRut').value = e?.rut||'';
+  $('epTel').value = e?.telefono||''; $('epEmail').value = e?.email||'';
+  $('epErr').textContent=''; $('epCuentaEstado').textContent='';
+  $('epCuentaEmail').value=''; $('epCuentaPass').value='';
+  $('epCuentaBox').style.display = e ? 'block' : 'none';
+  if(e) pintarCuentasEmpresa();
+  $('mEmpresa').classList.add('on'); $('epNombre').focus();
+}
+function pintarCuentasEmpresa(){
+  const gente = perfiles.filter(p=>p.empresa_reparto_id===empresaEditando);
+  const admins = gente.filter(p=>p.rol==='admin');
+  $('epCuentaLista').innerHTML = gente.length
+    ? (admins.length? 'Administradores: '+admins.map(u=>`<b>${esc(u.nombre)}</b> ${u.activo?'✅':'⛔'}`).join(' · ')
+                    : '<span class="cod">Todavía no tiene administrador.</span>')
+      + ` <span class="cod">— ${gente.length} persona${gente.length===1?'':'s'} en total</span>`
+    : '<span class="cod">Todavía no hay cuentas en esta empresa.</span>';
+}
+$('nuevaEmpresa').onclick = ()=> abrirModalEmpresa(null);
+$('epGuardar').onclick = async ()=>{
+  const nombre = $('epNombre').value.trim();
+  if(!nombre){ $('epErr').textContent='Ponle un nombre a la empresa.'; return; }
+  const fila = { nombre, rut:$('epRut').value.trim()||null,
+                 telefono:$('epTel').value.trim()||null, email:$('epEmail').value.trim()||null };
+  const { error } = empresaEditando
+    ? await sb.from('empresas_reparto').update(fila).eq('id', empresaEditando)
+    : await sb.from('empresas_reparto').insert(fila);
+  if(error){ $('epErr').textContent = error.message; return; }
+  cerrar('mEmpresa'); toast(empresaEditando?'Empresa actualizada':'Empresa creada');
+  await cargarTodo();
+};
+$('epCuentaCrear').onclick = async ()=>{
+  const e = $('epCuentaEmail').value.trim(), c = $('epCuentaPass').value;
+  const est = $('epCuentaEstado');
+  if(!empresaEditando){ est.innerHTML='<span style="color:#d03b3b">Guarda primero la empresa.</span>'; return; }
+  if(!e || c.length<6){ est.innerHTML='<span style="color:#d03b3b">Escribe el correo y una contraseña de mínimo 6 caracteres.</span>'; return; }
+  $('epCuentaCrear').disabled = true; est.textContent='Creando cuenta…';
+  try{
+    const nom = 'Admin '+($('epNombre').value.trim()||'empresa');
+    const aux = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {auth:{storageKey:'zas-aux', persistSession:false, autoRefreshToken:false}});
+    const { data, error } = await aux.auth.signUp({ email:e, password:c, options:{ data:{ nombre:nom } } });
+    if(error) throw new Error(error.message);
+    const uid = data.user?.id;
+    if(!uid) throw new Error('No se pudo obtener la cuenta creada');
+    await new Promise(r=>setTimeout(r, 900));
+    const { error:e2 } = await sb.from('perfiles')
+      .update({ rol:'admin', empresa_reparto_id:empresaEditando, superadmin:false, nombre:nom, correo:e })
+      .eq('id', uid);
+    if(e2) throw new Error(e2.message);
+    est.innerHTML = '<span style="color:#006300"><b>✅ Acceso creado.</b> Entra en esta misma página con ese correo y su contraseña.</span>';
+    $('epCuentaEmail').value=''; $('epCuentaPass').value='';
+    await cargarTodo(); pintarCuentasEmpresa();
+  }catch(err){ est.innerHTML = `<span style="color:#d03b3b">${esc(err.message)}</span>`; }
+  finally{ $('epCuentaCrear').disabled = false; }
+};
+
+/* ---- qué empresas puede usar un cliente (dentro del modal del cliente) ---- */
+function pintarEmpresasDelCliente(){
+  const box = $('cEmpresasBox');
+  if(!box) return;
+  if(!HAY_POOL || !soySuper || !clienteEditando){ box.style.display='none'; return; }
+  box.style.display='block';
+  const mias = habilitaciones.filter(h=>h.cliente_id===clienteEditando && h.activo!==false).map(h=>h.empresa_reparto_id);
+  $('cEmpresasLista').innerHTML = empresas.map(e=>`
+    <label style="display:flex;align-items:center;gap:8px;margin:0;font-size:13px;cursor:pointer">
+      <input type="checkbox" ${mias.includes(e.id)?'checked':''} onchange="habilitarEmpresa(${e.id}, this.checked)">
+      <span>${esc(e.nombre)}</span>
+    </label>`).join('') || '<span class="cod">No hay empresas de reparto creadas.</span>';
+  pintarReglasDelCliente();
+  const est = $('cEmpresasEstado');
+  est.innerHTML = mias.length>1
+    ? `<span style="color:#8a6100">⚖️ Con ${mias.length} empresas, el reparto lo decide el cliente con sus reglas. Lo que no calza con ninguna cae al <b>pool</b>.</span>`
+    : mias.length===1
+      ? '<span style="color:#006300">Los pedidos le llegan directo a esa empresa.</span>'
+      : '<span style="color:#d03b3b">⚠️ Sin ninguna marcada, sus pedidos quedan en el pool sin que nadie pueda verlos.</span>';
+}
+/* lo que el CLIENTE decidió: acá se mira, no se toca */
+function pintarReglasDelCliente(){
+  const caja = $('cReglasCliente');
+  if(!caja) return;
+  const cli = clientes.find(c=>c.id===clienteEditando);
+  if(!cli){ caja.innerHTML=''; return; }
+  const vs = habilitaciones.filter(h=>h.cliente_id===clienteEditando);
+  const nomE = id => (empresas.find(e=>e.id===id)||{}).nombre || ('empresa #'+id);
+  const modo = cli.modo_reparto === 'pool'
+    ? 'todo al <b>pool libre</b>: se lo lleva quien lo tome primero'
+    : 'reparto <b>por reglas</b>, y lo que no calza cae al pool';
+  const filas = vs.map(v=>{
+    const r = [];
+    if(v.comunas && v.comunas.length) r.push('comunas: '+v.comunas.join(', '));
+    else r.push('cualquier comuna');
+    if(v.cuota_diaria) r.push('máx. '+v.cuota_diaria+' al día');
+    if(v.porcentaje!=null) r.push(v.porcentaje+'% del total');
+    if(v.prioridad!=null && v.prioridad!==100) r.push('prioridad '+v.prioridad);
+    const estado = v.estado==='activa' ? (v.activo===false?' (pausada)':'') : ' ('+v.estado+')';
+    return `<div style="padding:3px 0"><b>${esc(nomE(v.empresa_reparto_id))}</b>${estado} — ${esc(r.join(' · '))}</div>`;
+  }).join('');
+  const lim = limitesDe(clienteEditando);
+  caja.innerHTML = `<b style="font-size:12.5px">📋 Lo que decidió el cliente</b>
+    <div style="margin-top:4px">Modo: ${modo}.</div>
+    ${filas || '<div style="color:var(--ink-2)">Todavía no puso reglas.</div>'}
+    <div style="margin-top:6px;color:var(--ink-2)">Freno: hasta ${lim.tope} pedidos tomados sin repartidor y ${lim.plazo} min para asignarlos.</div>
+    <div style="margin-top:6px;color:var(--ink-2)">Esto lo cambia el cliente desde su portal${soySuper?', o vos desde el panel maestro':''}.</div>`;
+}
+
+window.habilitarEmpresa = async (empId, v)=>{
+  if(!clienteEditando) return;
+  const { error } = v
+    ? await sb.from('cliente_empresas').upsert({cliente_id:clienteEditando, empresa_reparto_id:empId, activo:true})
+    : await sb.from('cliente_empresas').delete()
+        .eq('cliente_id', clienteEditando).eq('empresa_reparto_id', empId);
+  if(error){ $('cEmpresasEstado').innerHTML = `<span style="color:#d03b3b">${esc(error.message)}</span>`; return; }
+  const { data } = await sb.from('cliente_empresas').select();
+  habilitaciones = data||[];
+  pintarEmpresasDelCliente();
+};
+
+if($('srBuscar')) $('srBuscar').onclick = ()=> buscarEnLaRed();
+if($('srRut')) $('srRut').addEventListener('keydown', e=>{ if(e.key==='Enter') buscarEnLaRed(); });
 
 /* tabs */
-document.querySelectorAll('nav button').forEach(b=> b.onclick = ()=>{
+document.querySelectorAll('nav button[data-t]').forEach(b=> b.onclick = ()=>{
   document.querySelectorAll('nav button').forEach(x=>x.classList.remove('on'));
   b.classList.add('on');
-  ['resumen','pedidos','clientes','repartidores','mapa','reportes'].forEach(t=> $('t-'+t).style.display = t===b.dataset.t?'block':'none');
+  ['resumen','pedidos','pool','empresas','clientes','repartidores','mapa','reportes'].forEach(t=> $('t-'+t).style.display = t===b.dataset.t?'block':'none');
   if(b.dataset.t==='mapa') iniciarMapa();
   if(b.dataset.t==='reportes') cargarReportes();
+  if(b.dataset.t==='pool'){ $('poolAviso').style.display='none'; cargarTodo(); }
 });
 
 /* ---------- MAPA DE RUTAS ---------- */

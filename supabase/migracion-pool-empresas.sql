@@ -1,0 +1,21 @@
+-- ============================================================
+-- ⚠️ NO CORRAS ESTE ARCHIVO
+--
+-- Quedó reemplazado por:  migracion-red-empresas.sql
+--
+-- Esta versión solo tenía el pool (habilitar empresas por cliente y
+-- que la primera que toma se lo queda). Nunca llegó a correrse.
+--
+-- La nueva incluye todo eso MÁS:
+--   · las reglas de reparto que pone el cliente (comunas, cuota diaria,
+--     porcentaje, prioridad), con el pool como respaldo de lo que las
+--     reglas no resuelven;
+--   · el alta de clientes en la red con solicitud e invitación, para que
+--     nadie vea los datos de un cliente sin que él acepte;
+--   · los frenos anti-acaparamiento: tope de pedidos tomados sin
+--     repartidor y plazo para asignarlo, vencido el cual el pedido
+--     vuelve solo al pool;
+--   · el panel maestro (planes, uso por empresa, conducta en el pool).
+--
+-- Corré  migracion-red-empresas.sql  una sola vez en el SQL Editor.
+-- ============================================================

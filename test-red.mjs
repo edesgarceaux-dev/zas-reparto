@@ -1,0 +1,234 @@
+import { chromium } from 'playwright';
+import path from 'path';
+
+const url = 'file://' + path.resolve('panel/panel-zas.html');
+const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
+const page = await browser.newPage();
+const errors = [];
+page.on('pageerror', e => errors.push('pageerror: ' + e.message));
+page.on('console', m => { if (m.type()==='error' && !/ERR_CONNECTION|ERR_FILE_NOT_FOUND|ERR_NAME_NOT_RESOLVED|Failed to load resource/.test(m.text())) errors.push('console: '+m.text()); });
+await page.goto(url, { waitUntil: 'domcontentloaded' });
+
+const r = await page.evaluate(async () => {
+  const out = [];
+  const ok = (n, cond, extra='') => out.push({ n, ok: !!cond, extra });
+  const $ = id => document.getElementById(id);
+  const enMin = m => new Date(Date.now() + m*60000).toISOString();
+
+  window.__rpc = []; window.__upd = []; window.__del = [];
+  eval(`
+    sb.rpc = async (n,a) => {
+      window.__rpc.push({n,a});
+      if(n==='buscar_cliente_red'){
+        const r = String(a.p_rut).replace(/[^0-9kK]/g,'');
+        if(r==='761112223') return {data:{existe:true,id:7,nombre:'Panadería Doña Eli',comuna:'Maipú',vinculo:'sin_vinculo'},error:null};
+        if(r==='777777777') return {data:{existe:true,id:8,nombre:'Ya Trabajamos',vinculo:'activa'},error:null};
+        if(r==='888888888') return {data:{existe:true,id:9,nombre:'Esperando',vinculo:'pendiente'},error:null};
+        return {data:{existe:false},error:null};
+      }
+      return { data:{ok:true, mensaje:'Solicitud enviada. El cliente tiene que aceptarla desde su panel.'}, error:null };
+    };
+    sb.from = (t) => ({
+      select: () => { const o = { eq:()=>o, order:()=>o, limit:()=>o,
+        maybeSingle:()=>Promise.resolve({data:window.__sel(t)[0]||null,error:null}),
+        then:(f)=>Promise.resolve({data:window.__sel(t),error:null}).then(f) }; return o; },
+      update: (v) => { const o = { eq: ()=>o, then:(f)=>{ window.__upd.push({t,v}); return Promise.resolve({error:null}).then(f); } }; return o; },
+      delete: () => { const o = { eq: ()=>o, then:(f)=>{ window.__del.push({t}); return Promise.resolve({error:null}).then(f); } }; return o; },
+    });
+  `);
+  window.__sel = () => [];
+
+  // =====================================================================
+  //  PANEL DE LA EMPRESA DE REPARTO
+  // =====================================================================
+  const mkPool = (id, comuna, motivo) => ({ id, codigo:'ZAS-'+String(id).padStart(5,'0'),
+    cliente_nombre:'Don '+id, direccion:'Calle '+id, comuna, cliente_id:1, estado:'pendiente',
+    empresa_reparto_id:null, asignacion_motivo:motivo, creado_en:'2026-08-03T10:00:00Z', fecha_pedido:'2026-08-03' });
+
+  eval(`
+    HAY_POOL = true; soySuper = true; miEmpresa = 1;
+    configRed = { plazo_asignar_min:120, tope_sin_asignar:5 };
+    empresas = [{id:1,nombre:'Envíos ZAS',activo:true},{id:2,nombre:'Rápido Ltda',activo:true}];
+    clientes = [{id:1,nombre:'Distribuidora Pepitos',activo:true,modo_reparto:'reglas',plazo_asignar_min:null,tope_sin_asignar:null}];
+    habilitaciones = [
+      {cliente_id:1,empresa_reparto_id:1,estado:'activa',activo:true,comunas:['Maipú','Cerrillos'],cuota_diaria:40,porcentaje:null,prioridad:5},
+      {cliente_id:1,empresa_reparto_id:2,estado:'activa',activo:true,comunas:[],cuota_diaria:null,porcentaje:null,prioridad:100},
+      {cliente_id:5,empresa_reparto_id:1,estado:'pendiente',activo:true,solicitado_por:'cliente'},
+      {cliente_id:6,empresa_reparto_id:1,estado:'pendiente',activo:true,solicitado_por:'empresa'}
+    ];
+    clientes.push({id:5,nombre:'Me invitó'},{id:6,nombre:'Le pedí yo'});
+    perfiles = [{id:'u1',nombre:'Etienne',rol:'admin',activo:true,empresa_reparto_id:1,superadmin:true}];
+    poolPedidos = ${JSON.stringify([
+      mkPool(1,'Providencia','ninguna empresa cubre Providencia o todas llegaron a su cuota del día'),
+      mkPool(2,'Maipú','2 empresas calzan parejo: lo decide el pool'),
+      mkPool(3,'Ñuñoa','volvió al pool: venció el plazo para asignar repartidor'),
+    ])};
+    pedidos = [];
+    poolSel = new Set();
+  `);
+
+  // ---------- 1. el pool cuenta por qué está cada pedido ----------
+  window.pintarPool();
+  const tp = $('tbodyPool').innerHTML;
+  ok('1. el pool muestra por qué cayó cada pedido', /calzan parejo/.test(tp) && /venció el plazo/.test(tp) && /ninguna empresa cubre/.test(tp));
+  ok('1b. sigue mostrando los 3 del pool', document.querySelectorAll('#tbodyPool tr').length===3);
+
+  // ---------- 2. el aviso del tope ----------
+  const pr = $('poolReglas');
+  ok('2. avisa cuánto más se puede llevar', pr.style.display==='block' && /te podés llevar 5 más/.test(pr.textContent), pr.textContent.slice(0,120));
+  ok('2b. avisa el plazo para asignar', /120 min/.test(pr.textContent));
+
+  eval(`pedidos = [1,2,3,4,5].map(i=>({id:100+i,cliente_id:1,estado:'pendiente',repartidor_id:null,codigo:'ZAS-1'+i,cliente_nombre:'x',direccion:'y',fecha_pedido:'2026-08-03',creado_en:'2026-08-03T09:00:00Z'}));`);
+  window.pintarReglasPool();
+  ok('2c. cuando llegás al tope, lo dice', /llegaste al tope \(5 sin repartidor\)/.test($('poolReglas').textContent), $('poolReglas').textContent.slice(0,140));
+
+  // ---------- 3. el reloj para asignar repartidor ----------
+  eval(`pedidos = [
+    {id:201,cliente_id:1,estado:'pendiente',repartidor_id:null,vence_asignacion_en:'${enMin(15)}',codigo:'A',cliente_nombre:'x',direccion:'y',fecha_pedido:'2026-08-03',creado_en:'2026-08-03T09:00:00Z'},
+    {id:202,cliente_id:1,estado:'pendiente',repartidor_id:null,vence_asignacion_en:'${enMin(90)}',codigo:'B',cliente_nombre:'x',direccion:'y',fecha_pedido:'2026-08-03',creado_en:'2026-08-03T09:00:00Z'}
+  ];`);
+  window.pintarReloj();
+  ok('3. avisa cuáles están por vencerse', /1 pedido está por vencerse/.test($('avisoReloj').textContent), $('avisoReloj').textContent);
+
+  eval(`pedidos[0].vence_asignacion_en = '${enMin(-5)}';`);
+  window.pintarReloj();
+  ok('3b. avisa cuando alguno ya volvió al pool', /volvió al pool/.test($('avisoReloj').textContent), $('avisoReloj').textContent);
+
+  eval(`pedidos = [{id:203,cliente_id:1,estado:'asignado',repartidor_id:'r1',codigo:'C',cliente_nombre:'x',direccion:'y',fecha_pedido:'2026-08-03',creado_en:'2026-08-03T09:00:00Z'}];`);
+  window.pintarReloj();
+  ok('3c. si están todos asignados no molesta con avisos', $('avisoReloj').style.display==='none');
+
+  // ---------- 4. solicitudes de vínculo ----------
+  window.pintarVinculosPendientes();
+  const av = $('avisoVinculos');
+  ok('4. muestra la invitación que le toca responder', /Te invitaron a repartir/.test(av.textContent) && /Me invitó/.test(av.textContent), av.textContent.slice(0,140));
+  ok('4b. y la que está esperando respuesta del cliente', /Esperando que acepte/.test(av.textContent) && /Le pedí yo/.test(av.textContent), av.textContent.slice(0,200));
+
+  window.cargarTodo = async ()=>{};
+  await window.responderVinculo(5, true);
+  ok('4c. aceptar llama a responder_vinculo con mi empresa',
+      window.__rpc.some(r=>r.n==='responder_vinculo' && r.a.p_cliente_id===5 && r.a.p_empresa_id===1 && r.a.p_aceptar===true),
+      JSON.stringify(window.__rpc.filter(r=>r.n==='responder_vinculo')));
+
+  // ---------- 5. sumar un cliente de la red ----------
+  window.abrirSumarRed();
+  ok('5. abre el buscador por RUT', $('mSumarRed').classList.contains('on'));
+  $('srRut').value = '76.111.222-3';
+  await window.buscarEnLaRed();
+  ok('5b. encuentra al cliente y ofrece pedírselo', /Panadería Doña Eli/.test($('srResultado').innerHTML) && /Pedirle trabajar/.test($('srResultado').innerHTML));
+
+  await window.pedirCliente(7);
+  ok('5c. mandar la solicitud llama a solicitar_cliente',
+      window.__rpc.some(r=>r.n==='solicitar_cliente' && r.a.p_cliente_id===7));
+  ok('5d. avisa que ahora decide el cliente', /tiene que aceptarla/.test($('srResultado').textContent), $('srResultado').textContent);
+
+  $('srRut').value = '77.777.777-7'; await window.buscarEnLaRed();
+  ok('5e. si ya trabajás con él, no ofrece pedirlo de nuevo',
+      /Ya trabajás con este cliente/.test($('srResultado').textContent) && !/Pedirle trabajar/.test($('srResultado').innerHTML));
+  $('srRut').value = '88.888.888-8'; await window.buscarEnLaRed();
+  ok('5f. si ya le pediste, dice que está esperando', /Falta que la acepte|falta que la acepte/i.test($('srResultado').textContent), $('srResultado').textContent);
+  $('srRut').value = '11.111.111-1'; await window.buscarEnLaRed();
+  ok('5g. si no está en la red, manda a crearlo como nuevo', /no está en la red/.test($('srResultado').textContent));
+  $('srRut').value = ''; await window.buscarEnLaRed();
+  ok('5h. sin RUT pide el RUT', $('srErr').textContent.includes('Escribí el RUT'));
+
+  // ---------- 6. las reglas del cliente, en su ficha ----------
+  eval("clienteEditando = 1");
+  window.pintarEmpresasDelCliente();
+  const rc = $('cReglasCliente').textContent;
+  ok('6. la ficha del cliente muestra sus reglas', /Maipú, Cerrillos/.test(rc) && /máx\. 40 al día/.test(rc), rc.slice(0,200));
+  ok('6b. dice en qué modo está', /por reglas/.test(rc));
+  ok('6c. muestra los frenos que le corresponden', /hasta 5 pedidos tomados sin repartidor y 120 min/.test(rc), rc);
+  ok('6d. aclara que eso lo decide el cliente', /Esto lo cambia el cliente desde su portal/.test(rc));
+
+  // =====================================================================
+  //  PORTAL DEL CLIENTE
+  // =====================================================================
+  const DBC = {
+    empresas_reparto: [
+      {id:1,nombre:'Envíos ZAS',color:'#2563eb',activo:true},
+      {id:2,nombre:'Rápido Ltda',color:'#cc3300',activo:true},
+      {id:3,nombre:'Nueva SpA',color:'#00aa88',activo:true},
+    ],
+    cliente_empresas: [
+      {cliente_id:1,empresa_reparto_id:1,estado:'activa',activo:true,comunas:['Maipú'],cuota_diaria:30,porcentaje:70,prioridad:5},
+      {cliente_id:1,empresa_reparto_id:2,estado:'activa',activo:false,comunas:[],cuota_diaria:null,porcentaje:30,prioridad:100},
+      {cliente_id:1,empresa_reparto_id:3,estado:'pendiente',activo:true,solicitado_por:'empresa'},
+    ],
+    clientes: [{id:1,nombre:'Distribuidora Pepitos',modo_reparto:'reglas',plazo_asignar_min:999,tope_sin_asignar:2}],
+    config_red: [{plazo_asignar_min:120,tope_sin_asignar:30}],
+    v_empresa_conducta: [
+      {empresa_reparto_id:1,cliente_id:1,pedidos:80,entregados:78,no_entregados:2,devoluciones:1,min_promedio_asignar:10},
+      {empresa_reparto_id:2,cliente_id:1,pedidos:40,entregados:15,no_entregados:5,devoluciones:12,min_promedio_asignar:115},
+    ],
+  };
+  window.__sel = (t) => DBC[t] || [];
+  eval("empCliId = 1");
+
+  window.empTab('empresas');
+  await new Promise(r=>setTimeout(r,60));
+  ok('7. el cliente tiene su pestaña de empresas', $('empVistaEmpresas').style.display==='block' && $('empVistaPedidos').style.display==='none');
+
+  const vc = $('empVistaEmpresas');
+  ok('7b. lista sus empresas con las reglas cargadas',
+      vc.querySelector('#reg-com-1').value==='Maipú' && vc.querySelector('#reg-cuo-1').value==='30' &&
+      vc.querySelector('#reg-pct-1').value==='70' && vc.querySelector('#reg-pri-1').value==='5');
+  ok('7c. marca la que está en pausa', /en pausa/.test(vc.textContent) && /Reanudar/.test(vc.textContent));
+  ok('7d. muestra la solicitud que le mandaron', /Nueva SpA/.test(vc.textContent) && /te mandó una solicitud/.test(vc.textContent));
+  ok('7e. deja elegir el modo de reparto', vc.querySelectorAll('input[name="modoRep"]').length===2 &&
+      vc.querySelector('input[name="modoRep"][value="reglas"]').checked);
+
+  ok('8. le recorta el plazo al piso de la red', $('empPlazo').value==='120', 'valor='+$('empPlazo').value);
+  ok('8b. pero le respeta el tope más estricto que puso él', $('empTope').value==='2', 'valor='+$('empTope').value);
+  ok('8c. le dice cuál es el máximo permitido', /Máximo permitido: 120/.test(vc.textContent) && /Máximo permitido: 30/.test(vc.textContent));
+
+  ok('9. muestra cómo se porta cada empresa con sus pedidos', /115 min/.test(vc.textContent) && /10 min/.test(vc.textContent));
+
+  // guardar reglas
+  $('reg-com-1').value = 'Maipú, Ñuñoa , Cerrillos';
+  $('reg-cuo-1').value = ''; $('reg-pct-1').value = '60'; $('reg-pri-1').value = '2';
+  await window.empGuardarReglas(1);
+  const u = window.__upd.filter(x=>x.t==='cliente_empresas').pop();
+  ok('10. guarda las comunas separadas y limpias', JSON.stringify(u.v.comunas)===JSON.stringify(['Maipú','Ñuñoa','Cerrillos']), JSON.stringify(u.v));
+  ok('10b. una cuota vacía queda sin tope', u.v.cuota_diaria===null);
+  ok('10c. guarda porcentaje y prioridad', u.v.porcentaje===60 && u.v.prioridad===2);
+
+  await window.empGuardarModo('pool');
+  ok('11. cambiar a pool libre se guarda en su ficha',
+      window.__upd.some(x=>x.t==='clientes' && x.v.modo_reparto==='pool'));
+
+  $('empPlazo').value='45'; $('empTope').value='3';
+  await window.empGuardarFrenos();
+  ok('11b. guarda sus propios frenos',
+      window.__upd.some(x=>x.t==='clientes' && x.v.plazo_asignar_min===45 && x.v.tope_sin_asignar===3),
+      JSON.stringify(window.__upd.filter(x=>x.t==='clientes')));
+
+  await window.empResponder(3, true);
+  ok('12. aceptar la solicitud llama a responder_vinculo',
+      window.__rpc.some(r=>r.n==='responder_vinculo' && r.a.p_empresa_id===3 && r.a.p_cliente_id===1));
+
+  await window.empPausar(2, true);
+  ok('12b. reanudar una empresa la vuelve a activar',
+      window.__upd.some(x=>x.t==='cliente_empresas' && x.v.activo===true));
+
+  window.confirm = () => true;
+  await window.empSacar(2);
+  ok('12c. sacar una empresa la borra del vínculo', window.__del.some(d=>d.t==='cliente_empresas'));
+
+  window.empTab('pedidos');
+  ok('13. vuelve a sus pedidos sin perder nada', $('empVistaPedidos').style.display==='block' && $('empVistaEmpresas').style.display==='none');
+
+  // ---------- 14. sin la migración corrida ----------
+  eval("HAY_POOL = false; poolPedidos = []; pedidos = [{id:5,codigo:'ZAS-5',estado:'pendiente',cliente_nombre:'v',direccion:'x',fecha_pedido:'2026-08-03',creado_en:'2026-08-03T09:00:00Z'}];");
+  eval("repartirPedidos([{id:7,codigo:'ZAS-7',estado:'pendiente'}])");
+  ok('14. sin la migración, ningún pedido se va al pool por error', eval("pedidos.length===1 && poolPedidos.length===0"));
+
+  return out;
+});
+
+await browser.close();
+let malos = 0;
+for (const t of r) { if (!t.ok) malos++; console.log((t.ok?'✅':'❌') + ' ' + t.n + (t.extra?('  ← '+t.extra):'')); }
+if (errors.length) { console.log('\nERRORES DE LA PÁGINA:'); errors.forEach(e=>console.log('  '+e)); }
+console.log(`\n${r.length - malos}/${r.length} pruebas OK` + (errors.length?` · ${errors.length} errores de página`:''));
+process.exit(malos || errors.length ? 1 : 0);

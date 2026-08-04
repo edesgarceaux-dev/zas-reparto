@@ -398,6 +398,12 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     <video id="cqVideo" playsinline style="width:100%;max-width:340px;border-radius:12px;background:#000"></video>
   </div>
   <div id="cqAviso" style="margin-top:12px;padding:10px 12px;border-radius:10px;font-size:13.5px;font-weight:600;background:#f0efec">Elige un repartidor para empezar.</div>
+  <div id="cqCrudo" style="display:none;margin-top:8px;padding:10px 12px;border:1px dashed var(--grid);border-radius:10px">
+    <div style="font-size:11.5px;color:var(--muted);margin-bottom:5px">Esto es lo que traía ese código, tal cual. Cópialo y mándamelo si no reconoce una etiqueta que debería funcionar:</div>
+    <div id="cqCrudoTexto" style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;word-break:break-all;background:#f5f4f1;padding:8px;border-radius:6px;user-select:all"></div>
+    <button class="btn btn-ghost" style="margin-top:6px;padding:3px 10px;font-size:11.5px"
+      onclick="navigator.clipboard.writeText(document.getElementById('cqCrudoTexto').textContent).then(()=>toast('Copiado'))">📋 Copiar</button>
+  </div>
   <div style="display:flex;align-items:center;gap:10px;margin-top:12px">
     <b id="cqContador" style="font-size:15px">0 cargados</b>
     <span class="sp" style="flex:1"></span>
@@ -1247,9 +1253,14 @@ async function cqProcesar(texto){
 
   const p = buscarPedidoPorEtiqueta(t);
   if(!p){
+    // mostramos el contenido crudo: es la única forma de saber qué trae
+    // realmente una etiqueta que no calza (sirve para diagnosticar Flex)
     cqAviso('❌ No encontré ningún pedido con esa etiqueta', 'err');
+    $('cqCrudo').style.display = 'block';
+    $('cqCrudoTexto').textContent = t;
     cqBip(false); return;
   }
+  $('cqCrudo').style.display = 'none';
   if(p.repartidor_id === rep){
     cqAviso('Ya estaba cargado a ' + nombreDe(rep) + ' · ' + (p.codigo||'#'+p.id), 'warn');
     cqBip(false); return;
@@ -1281,6 +1292,7 @@ window.abrirCargaQr = ()=>{
     perfiles.filter(r=>r.activo && r.rol!=='empresa')
       .map(r=>`<option value="${r.id}">${esc(r.nombre)}${r.rol==='admin'?' (admin)':''}</option>`).join('');
   $('cqEntrada').value = '';
+  $('cqCrudo').style.display = 'none';
   cqAviso('Elige un repartidor y empieza a escanear.', 'info');
   cqPintar();
   $('mCargaQr').classList.add('on');
