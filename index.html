@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ZAS Reparto — Panel de Control</title>
-<!-- panel v1.38 -->
+<!-- panel v1.39 -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -184,6 +184,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         <select id="masivaRep" style="width:auto;padding:6px 8px"></select>
         <button class="btn" id="masivaAsignar">Asignar</button>
         <button class="btn btn-ghost" style="color:#fff;border-color:#666" id="masivaDesasignar">Quitar asignación</button>
+        <button class="btn btn-ghost" style="color:#9dd0ff;border-color:#456" id="masivaDevolver" title="Los suelta para que los pueda tomar otra empresa">📤 Devolver al pool</button>
         <button class="btn btn-ghost" style="color:#ff9d9d;border-color:#844" id="masivaCancelar">🚫 Cancelar</button>
         <span class="sp" style="flex:1"></span>
         <button class="btn btn-ghost" style="color:#fff;border-color:#666" onclick="limpiarSeleccion()">✕ Limpiar</button>
@@ -197,17 +198,21 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     <!-- Pool -->
     <section id="t-pool" style="display:none">
       <div class="bar">
-        <span style="color:var(--muted);font-size:13px">Pedidos <b>sin dueño</b>, a la vista de todas las empresas habilitadas. <b>Se reclaman cargándolos</b>: el repartidor que escanea la etiqueta con su app se lo lleva para su empresa.</span>
+        <span style="color:var(--muted);font-size:13px">Pedidos <b>sin dueño</b>, a la vista de todas las empresas habilitadas. <b>Reservalos</b> para armar la ruta y asignarles repartidor; el escaneo en el galpón confirma que te los llevaste. Lo que no reserves nadie, se lo lleva el primero que lo escanee.</span>
         <span class="sp"></span>
         <select id="poolComuna" style="width:auto;min-width:150px" onchange="poolFiltrarComuna(this.value)"><option value="">Todas las comunas</option></select>
         <input type="search" id="poolBuscar" placeholder="Buscar cliente, dirección…" style="max-width:220px">
       </div>
-      <div id="poolBarra" style="display:none"></div>
-      <span id="poolSelN" style="display:none"></span><span id="poolTomar" style="display:none"></span>
+      <div id="poolBarra" style="display:none;background:var(--ink);color:#fff;border-radius:10px;padding:8px 14px;margin-bottom:10px;align-items:center;gap:10px">
+        <b id="poolSelN"></b>
+        <button class="btn" id="poolTomar" style="background:#0CA30C;border-color:#0CA30C" onclick="tomarSeleccionados()">📥 Reservar seleccionados</button>
+        <span class="sp" style="flex:1"></span>
+        <button class="btn btn-ghost" style="color:#fff;border-color:#666" onclick="poolLimpiar()">✕ Limpiar</button>
+      </div>
       <div id="poolReglas" style="display:none;margin-bottom:10px;padding:9px 14px;border-radius:10px;font-size:12.5px;background:#EEF4FF;border:1px solid #C9DAF8;color:#1e3a6b"></div>
       <div id="poolAviso" style="display:none;margin-bottom:10px;padding:10px 14px;border-radius:10px;font-size:13px"></div>
       <div class="tbl"><table id="tblPool">
-        <thead><tr><th>Código</th><th>Empresa</th><th>Cliente final</th><th>Dirección</th><th>Comuna</th><th>Por qué está acá</th><th>Entró al pool</th></tr></thead>
+        <thead><tr><th><input type="checkbox" id="poolTodos" onclick="poolSeleccionarTodos(this.checked)"></th><th>Código</th><th>Empresa</th><th>Cliente final</th><th>Dirección</th><th>Comuna</th><th>Por qué está acá</th><th>Entró al pool</th><th></th></tr></thead>
         <tbody id="tbodyPool"></tbody>
       </table></div>
     </section>
@@ -707,7 +712,7 @@ const EST = {
 };
 const FIN = ['entregado','cancelado','no_entregado'];
 let pedidos = [], perfiles = [], clientes = [], filtro = 'activos', busq = '', clienteEditando = null;
-/* ---- POOL / RED DE EMPRESAS DE REPARTO (v1.38) ---- */
+/* ---- POOL / RED DE EMPRESAS DE REPARTO (v1.39) ---- */
 let empresas = [], habilitaciones = [], poolPedidos = [];
 let miEmpresa = null, soySuper = false, HAY_POOL = false;
 /* v1.33: reglas de reparto del cliente y frenos anti-acaparamiento */
@@ -2555,6 +2560,26 @@ $('masivaDesasignar').onclick = async ()=>{
   limpiarSeleccion(); cargarTodo();
 };
 
+$('masivaDevolver').onclick = async ()=>{
+  const ids = [...seleccion];
+  if(!ids.length) return;
+  if(!confirm(`¿Devolver ${ids.length} pedido(s) al pool?\n\nDejan de ser tuyos y cualquier empresa habilitada por ese cliente se los puede llevar. Los que ya van en ruta no se pueden soltar.`)) return;
+  const { data, error } = await sb.rpc('devolver_pedidos', { p_ids: ids, p_nota: 'devueltos en lote desde el panel' });
+  if(error){
+    toast(/devolver_pedidos/.test(error.message)
+      ? 'Falta correr migracion-red-empresas.sql en Supabase.'
+      : 'Error: '+error.message);
+    return;
+  }
+  const n = data?.devueltos || 0;
+  const noPudo = data?.no_pudo || [];
+  toast(n
+    ? `📤 ${n} ${n===1?'pedido devuelto':'pedidos devueltos'} al pool` +
+      (noPudo.length ? ` · ${noPudo.length} no se pudo` : '')
+    : `No se pudo devolver ninguno: ${noPudo[0]?.motivo || 'revisá el estado'}`);
+  limpiarSeleccion(); cargarTodo();
+};
+
 $('masivaCancelar').onclick = async ()=>{
   const ids = [...seleccion];
   if(!confirm(`¿Cancelar ${ids.length} pedido(s)? Útil para limpiar pedidos antiguos que no repartió ZAS. Se pueden reactivar uno a uno desde el detalle.`)) return;
@@ -2840,6 +2865,7 @@ function pintarPool(){
   const lista = poolListaVisible();
   $('tbodyPool').innerHTML = lista.length ? lista.map(p=>`
     <tr>
+      <td onclick="event.stopPropagation()"><input type="checkbox" ${poolSel.has(p.id)?'checked':''} onchange="poolAlternar(${p.id}, this.checked)"></td>
       <td class="cod">${esc(p.codigo||'#'+p.id)}${p.origen==='jumpseller'?' <span style="color:#1baf7a" title="Jumpseller">⚡</span>':''}${p.origen==='mercadolibre'?' <span style="color:#3483fa;font-weight:800" title="MercadoLibre Flex">Ⓜ</span>':''}</td>
       <td>${p.cliente_id? esc(clienteDe(p.cliente_id)||'…') : '<span class="cod">—</span>'}</td>
       <td><b>${esc(p.cliente_nombre)}</b></td>
@@ -2847,8 +2873,9 @@ function pintarPool(){
       <td>${p.comuna? esc(p.comuna) : '<span class="cod">—</span>'}</td>
       <td style="font-size:12px;color:var(--ink-2);max-width:230px">${esc(p.asignacion_motivo||'—')}</td>
       <td class="cod">${fechaHora(p.creado_en)}</td>
+      <td><button class="btn" style="padding:4px 12px;background:#0CA30C;border-color:#0CA30C" onclick="tomarDelPool([${p.id}])">📥 Reservar</button></td>
     </tr>`).join('')
-    : `<tr><td colspan="7" class="empty">${n? 'Ningún pedido del pool calza con este filtro.' : 'El pool está vacío: no hay pedidos esperando dueño.'}</td></tr>`;
+    : `<tr><td colspan="9" class="empty">${n? 'Ningún pedido del pool calza con este filtro.' : 'El pool está vacío: no hay pedidos esperando dueño.'}</td></tr>`;
 
   pintarReglasPool();
 
@@ -2954,8 +2981,8 @@ function pintarReglasPool(){
   caja.style.display='block';
   caja.innerHTML = '📦 <b>' + poolPedidos.length + (poolPedidos.length===1?' pedido esperando' : ' pedidos esperando') + '</b>'
     + (nombres.length ? ' de ' + nombres.map(esc).join(', ') : '')
-    + '.<br><span style="opacity:.85">Se los queda la empresa cuyo repartidor <b>escanee la etiqueta</b> al cargarlos. '
-    + 'No hay que apretar nada acá: el que se lo lleva es el que lo carga.</span>';
+    + '.<br><span style="opacity:.85"><b>Reservá</b> los que vas a llevar para poder armarles la ruta y asignarles repartidor. '
+    + 'El escaneo en el galpón confirma la carga. Los que no reserve nadie se los lleva la empresa cuyo repartidor los escanee primero.</span>';
 }
 
 /* solicitudes de vínculo esperando respuesta */
