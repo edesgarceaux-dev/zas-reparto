@@ -26,13 +26,15 @@ const r = await page.evaluate(async () => {
         if(r==='888888888') return {data:{existe:true,id:9,nombre:'Esperando',vinculo:'pendiente'},error:null};
         return {data:{existe:false},error:null};
       }
+      if(n==='planificar_pedidos') return { data:{planificados:(a.p_ids||[]).length}, error:null };
       return { data:{ok:true, mensaje:'Solicitud enviada. El cliente tiene que aceptarla desde su panel.'}, error:null };
     };
     sb.from = (t) => ({
       select: () => { const o = { eq:()=>o, order:()=>o, limit:()=>o,
         maybeSingle:()=>Promise.resolve({data:window.__sel(t)[0]||null,error:null}),
+        gte:()=>o, not:()=>o, in:()=>o,
         then:(f)=>Promise.resolve({data:window.__sel(t),error:null}).then(f) }; return o; },
-      update: (v) => { const o = { eq: ()=>o, then:(f)=>{ window.__upd.push({t,v}); return Promise.resolve({error:null}).then(f); } }; return o; },
+      update: (v) => { const o = { eq: ()=>o, in: ()=>o, not: ()=>o, then:(f)=>{ window.__upd.push({t,v}); return Promise.resolve({error:null}).then(f); } }; return o; },
       delete: () => { const o = { eq: ()=>o, then:(f)=>{ window.__del.push({t}); return Promise.resolve({error:null}).then(f); } }; return o; },
       insert: (v) => ({ then:(f)=>{ window.__ins.push({t,v}); return Promise.resolve(window.__insErr||{error:null}).then(f); } }),
     });
@@ -51,7 +53,7 @@ const r = await page.evaluate(async () => {
   await window.cargarTodo();
   ok('0. empresa nueva sin pedidos: igual reconoce que la migración está corrida',
       eval("HAY_POOL") === true, 'HAY_POOL=' + eval("HAY_POOL"));
-  ok('0b. le muestra la pestaña Pool', $('navPool').style.display !== 'none');
+  ok('0b. le muestra la pestaña Mi carga', $('navPool').style.display !== 'none');
   ok('0c. le muestra el botón de sumar clientes de la red', $('btnSumarRed').style.display !== 'none');
   ok('0d. y ve la invitación que le mandaron', /Te invitaron a repartir/.test($('avisoVinculos').textContent),
       $('avisoVinculos').textContent.slice(0,80));
@@ -80,10 +82,10 @@ const r = await page.evaluate(async () => {
       !eval("perfiles").some(p=>p.nombre==='Repa Rapiditos'), eval("JSON.stringify(perfiles.map(p=>p.nombre))"));
   ok('0g. tampoco los clientes de la otra', !eval("clientes").some(c=>c.nombre==='Cliente de la otra'),
       eval("JSON.stringify(clientes.map(c=>c.nombre))"));
-  ok('0h. ni sus pedidos', eval("pedidos").length===1 && eval("pedidos[0].codigo")==='A',
+  ok('0h. ni sus pedidos', eval("pedidos.filter(p=>p.codigo==='B').length")===0,
       eval("JSON.stringify(pedidos.map(p=>p.codigo))"));
-  ok('0i. ni el pool de un cliente que no es suyo', eval("poolPedidos").length===0,
-      eval("JSON.stringify(poolPedidos.map(p=>p.codigo))"));
+  ok('0i. ni los pedidos compartidos de un cliente que no es suyo',
+      !eval("pedidos").some(p=>p.codigo==='C'), eval("JSON.stringify(pedidos.map(p=>p.codigo))"));
   ok('0j. le avisa qué empresa está mirando',
       $('avisoEmpresa').style.display==='block' && /Envíos ZAS/.test($('avisoEmpresa').textContent),
       $('avisoEmpresa').textContent.slice(0,90));
@@ -119,20 +121,70 @@ const r = await page.evaluate(async () => {
     poolSel = new Set();
   `);
 
-  // ---------- 1. el pool cuenta por qué está cada pedido ----------
-  window.pintarPool();
-  const tp = $('tbodyPool').innerHTML;
-  ok('1. el pool muestra por qué cayó cada pedido', /calzan parejo/.test(tp) && /venció el plazo/.test(tp) && /ninguna empresa cubre/.test(tp));
-  ok('1b. sigue mostrando los 3 del pool', document.querySelectorAll('#tbodyPool tr').length===3);
+  // ---------- 2. los compartidos viven dentro de Pedidos ----------
+  eval(`
+    misPlanes = [{pedido_id:2, empresa_reparto_id:1, repartidor_id:'u1'}];
+    perfiles = [{id:'u1',nombre:'Repa ZAS',rol:'repartidor',activo:true,empresa_reparto_id:1}];
+    pedidos = [
+      {id:1,codigo:'MIO',cliente_id:1,empresa_reparto_id:1,repartidor_id:'u1',estado:'asignado',
+       cliente_nombre:'a',direccion:'x',comuna:'Maipú',fecha_pedido:'2026-08-04',creado_en:'2026-08-04T09:00:00Z'},
+      {id:2,codigo:'COMP',cliente_id:1,empresa_reparto_id:null,repartidor_id:null,estado:'pendiente',
+       cliente_nombre:'b',direccion:'y',comuna:'Ñuñoa',fecha_pedido:'2026-08-04',creado_en:'2026-08-04T09:00:00Z'}];
+    filtro='todos'; busq='';
+  `);
+  window.pintarPedidos();
+  const tped = $('tbodyPed').innerHTML;
+  ok('2. los compartidos aparecen en Pedidos junto con los míos',
+      /MIO/.test(tped) && /COMP/.test(tped), '');
+  ok('2b. el compartido se marca como tal', /compartido/.test(tped), '');
+  ok('2c. y muestra el repartidor previsto del plan propio',
+      /Repa ZAS <span class="cod">\(previsto\)/.test(tped), '');
 
-  // ---------- 2. el pool ya no se toma con el mouse ----------
-  const pr = $('poolReglas');
-  ok('2. explica que se reclama escaneando', pr.style.display==='block' &&
-      /escanee la etiqueta/.test(pr.textContent), pr.textContent.slice(0,120));
-  ok('2b. no quedó ningún botón de tomar en el pool',
-      !/Tomar/.test($('tbodyPool').innerHTML), '');
-  ok('2c. ni casillas para seleccionar', !/type="checkbox"/.test($('tbodyPool').innerHTML), '');
-  ok('2d. dice cuántos hay esperando', /3 pedidos esperando/.test(pr.textContent), pr.textContent.slice(0,60));
+  // ---------- 2d. asignar reparte según sea mío o compartido ----------
+  window.__upd = []; window.__rpc = [];
+  eval("seleccion.clear(); seleccion.add(1); seleccion.add(2);");
+  $('masivaRep').innerHTML = '<option value="u1">Repa ZAS</option>';
+  $('masivaRep').value = 'u1';
+  await $('masivaAsignar').onclick();
+  ok('2d. el mío se asigna escribiendo el pedido',
+      window.__upd.some(u=>u.t==='pedidos' && u.v.repartidor_id==='u1'), JSON.stringify(window.__upd));
+  ok('2e. el compartido va a plan_reparto, no al pedido',
+      window.__rpc.some(r=>r.n==='planificar_pedidos' && r.a.p_ids.length===1 && r.a.p_ids[0]===2),
+      JSON.stringify(window.__rpc.filter(r=>r.n==='planificar_pedidos')));
+
+  // ---------- 2f. avisos de lo que se perdió ----------
+  eval("avisosRed = [{id:1,texto:'El pedido ZAS-1 (Maipú) lo cargó Rapiditos 360: salió de tu ruta.'}];");
+  window.pintarAvisos();
+  ok('2f. avisa los pedidos que se le escaparon',
+      $('avisosRed').style.display==='block' && /lo cargó Rapiditos 360/.test($('avisosRed').textContent),
+      $('avisosRed').textContent.slice(0,90));
+  await window.marcarAvisosVistos();
+  ok('2g. se pueden dar por vistos',
+      $('avisosRed').style.display==='none' && window.__upd.some(u=>u.t==='avisos_red' && u.v.visto===true));
+
+  // ---------- 2h. Mi carga ----------
+  eval(`poolPedidos = [{id:9,codigo:'CARGADO',cliente_id:1,empresa_reparto_id:1,repartidor_id:'u1',
+        estado:'asignado',cliente_nombre:'c',direccion:'z',comuna:'Maipú',
+        cargado_en:'2026-08-04T11:00:00Z',creado_en:'2026-08-04T09:00:00Z'}];
+        poolComunaSel=''; poolBusq='';`);
+  window.pintarPool();
+  ok('2h. Mi carga muestra lo ya escaneado', /CARGADO/.test($('tbodyPool').innerHTML), '');
+  ok('2i. y dice cuántos bultos son', /1 bulto cargado/.test($('carRes').textContent), $('carRes').textContent);
+
+  // reponemos el escenario para las pruebas que siguen
+  eval(`
+    misPlanes = []; avisosRed = [];
+    perfiles = [{id:'u1',nombre:'Etienne',rol:'admin',activo:true,empresa_reparto_id:1,superadmin:true}];
+    clientes = [{id:1,nombre:'Distribuidora Pepitos',activo:true,modo_reparto:'reglas',plazo_asignar_min:null,tope_sin_asignar:null},
+                {id:5,nombre:'Me invitó'},{id:6,nombre:'Le pedí yo'}];
+    habilitaciones = [
+      {cliente_id:1,empresa_reparto_id:1,estado:'activa',activo:true,comunas:['Maipú','Cerrillos'],cuota_diaria:40,porcentaje:null,prioridad:5},
+      {cliente_id:1,empresa_reparto_id:2,estado:'activa',activo:true,comunas:[],cuota_diaria:null,porcentaje:null,prioridad:100},
+      {cliente_id:5,empresa_reparto_id:1,estado:'pendiente',activo:true,solicitado_por:'cliente'},
+      {cliente_id:6,empresa_reparto_id:1,estado:'pendiente',activo:true,solicitado_por:'empresa'}];
+    empresas = [{id:1,nombre:'Envíos ZAS',activo:true},{id:2,nombre:'Rápido Ltda',activo:true}];
+    seleccion.clear();
+  `);
 
   // ---------- 3. el reloj para asignar repartidor ----------
   eval(`pedidos = [

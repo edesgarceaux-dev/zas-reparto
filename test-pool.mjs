@@ -126,8 +126,8 @@ const r = await page.evaluate(async () => {
   const cajaEmp = document.getElementById('cEmpresasBox');
   ok('13. la ficha del cliente muestra las empresas', cajaEmp.style.display==='block' &&
       document.querySelectorAll('#cEmpresasLista input:checked').length===2);
-  ok('13b. avisa que con 2 empresas los pedidos van al pool',
-      document.getElementById('cEmpresasEstado').textContent.includes('pool'),
+  ok('13b. avisa que con 2 empresas queda compartido',
+      document.getElementById('cEmpresasEstado').textContent.includes('compartido'),
       document.getElementById('cEmpresasEstado').textContent);
 
   eval("habilitaciones = [{cliente_id:1,empresa_reparto_id:1,activo:true}]");

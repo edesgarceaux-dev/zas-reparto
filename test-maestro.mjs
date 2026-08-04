@@ -50,7 +50,7 @@ const r = await page.evaluate(async () => {
       ...Array.from({length:9},()=>({empresa_reparto_id:2,accion:'vencido',creado_en:'2026-08-01T12:00:00Z'})),
       ...Array.from({length:4},()=>({empresa_reparto_id:2,accion:'devuelto',creado_en:'2026-08-01T12:00:00Z'})),
     ],
-    config_red: {id:1,plazo_asignar_min:120,tope_sin_asignar:30},
+    config_red: {id:1,plazo_asignar_min:120,tope_sin_asignar:30,comunas_cobertura:['Maipú','Ñuñoa','Providencia']},
   };
 
   const chain = (rows) => {
@@ -131,6 +131,19 @@ const r = await page.evaluate(async () => {
   await $('rGuardar').onclick();
   ok('6c. guarda plazo y tope', window.__updates.some(u=>u.t==='config_red' && u.v.plazo_asignar_min===90 && u.v.tope_sin_asignar===15),
       JSON.stringify(window.__updates.filter(u=>u.t==='config_red')));
+
+  // ---------- 6d. zona de cobertura ----------
+  ok('6d. carga las comunas de la red', $('rComunas').value === 'Maipú, Ñuñoa, Providencia', $('rComunas').value);
+  ok('6e. dice cuántas son', /3 comunas cargadas/.test($('rComunasN').textContent), $('rComunasN').textContent);
+  $('rComunasRm').onclick();
+  ok('6f. el botón carga las 52 de la RM', $('rComunas').value.split(',').length === 52,
+      String($('rComunas').value.split(',').length));
+  $('rComunas').value = 'Maipú , Ñuñoa,  Cerrillos ';
+  await $('rComunasGuardar').onclick();
+  ok('6g. guarda la lista limpia y sin espacios',
+      window.__updates.some(u=>u.t==='config_red' &&
+        JSON.stringify(u.v.comunas_cobertura)===JSON.stringify(['Maipú','Ñuñoa','Cerrillos'])),
+      JSON.stringify(window.__updates.filter(u=>u.t==='config_red').slice(-1)));
 
   // ---------- 7. modal de empresa ----------
   window.abrirEmp(2);

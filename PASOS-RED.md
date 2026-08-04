@@ -1,106 +1,86 @@
-# Pasos para poner en marcha la red de empresas de reparto
+# TODO LO QUE HAY QUE HACER — en orden
 
-Panel v1.33 · Maestro v1.0 · migración `migracion-red-empresas.sql`
-
----
-
-## 1. Correr el SQL (5 min)
-
-Supabase → **SQL Editor** → **New query** → pegar todo el contenido de
-`supabase/migracion-red-empresas.sql` → **Run**.
-
-Es una sola migración y es segura de correr más de una vez. **No** corras
-`migracion-pool-empresas.sql`: quedó anulada, el archivo es solo un aviso.
-
-Al terminar tiene que devolver una fila así:
-
-| empresas_de_reparto | super_admins | vinculos_activos | pedidos_en_el_pool | plazo_minutos | tope_sin_asignar |
-|---|---|---|---|---|---|
-| 1 | 1 | (tus clientes) | **0** | 120 | 30 |
-
-Lo importante: **`pedidos_en_el_pool` tiene que dar 0** (todo lo viejo queda
-tuyo, nada se va al pool) y **`super_admins` tiene que dar 1** (vos).
-Si alguno de esos dos no calza, pará y avisame antes de seguir.
-
-Si aparece un aviso que dice *"hay N RUT repetidos en clientes"*, arreglá esos
-RUT y volvé a correr la migración: sin RUT único no funciona el alta de
-clientes de la red.
+Panel v1.40 · Maestro v1.2 · APK v2.6.0
+Hacelo de arriba abajo, sin saltear. Toma unos 20 minutos.
 
 ---
 
-## 2. Subir los dos paneles
+## 1. Correr 5 archivos SQL, EN ESTE ORDEN
 
-A donde los tengas publicados (GitHub Pages):
+Supabase → **SQL Editor** → **New query** → pegar todo el archivo → **Run**.
+Uno por uno. Todos son seguros de repetir. Están en la carpeta `supabase/`.
 
-- `panel/panel-zas.html` — el de siempre, ahora v1.33
-- `panel/panel-maestro.html` — **nuevo**, va al lado del otro
+| # | Archivo | Qué hace |
+|---|---------|----------|
+| 1 | `migracion-red-empresas.sql` | ✅ **ya la corriste**, saltala |
+| 2 | `migracion-ajuste-frenos.sql` | ordena los frenos viejos |
+| 3 | `migracion-zona-cobertura.sql` | carga las 52 comunas de la RM |
+| 4 | `migracion-escaneo-reclama.sql` | el escaneo reclama el pedido |
+| 5 | `migracion-plan-y-carga.sql` | planificar en paralelo + «Mi carga» + avisos |
 
-El maestro no funciona si no está en la misma carpeta: el botón 🛰️ Maestro
-del panel apunta a `panel-maestro.html` relativo.
+**Qué mirar en cada una** (te devuelven una tabla al final):
+- En la **3**: `comunas_que_reparte` tiene que dar **52**. Abajo te lista las comunas que quedaron fuera de zona — si ves una de la RM mal escrita, la agregás después desde el maestro.
+- En la **5**: `clientes_por_reglas` + `clientes_modo_abierto` tiene que ser el total de tus clientes.
 
----
-
-## 3. Comprobar que quedó bien
-
-1. Abrí el panel de siempre y recargá con **Ctrl+F5** (si no, el navegador te
-   deja el viejo en caché).
-2. Tienen que aparecer la pestaña **📥 Pool** y el botón **🛰️ Maestro**.
-3. Entrá al maestro. Si te dice *"esta cuenta no es la dueña del sistema"*,
-   pará y avisame: quiere decir que el `superadmin` quedó en otra cuenta.
-
----
-
-## 4. Probar la red con una empresa de mentira (10 min)
-
-Vale la pena hacerlo antes de meter una empresa real.
-
-1. **Maestro → Empresas → + Nueva empresa de reparto**. Nombre: `Rápido Ltda`.
-   Guardar.
-2. En la misma ficha, abajo, **crear un acceso**: un correo tuyo alternativo y
-   una contraseña. Esa es la cuenta de administrador de esa empresa.
-3. Abrí una **ventana de incógnito** y entrá al panel con esa cuenta.
-   Tiene que ver **cero pedidos y cero clientes**. Si ve algo tuyo, pará y
-   avisame: eso sería una filtración entre empresas.
-4. Entrá al **portal del cliente** (la cuenta de Distribuidora Pepitos) →
-   pestaña **🚚 Mis empresas de reparto** → abajo, *Sumar otra empresa* →
-   elegí `Rápido Ltda` → **Invitar**.
-5. Volvé a la ventana de Rápido: en Clientes le aparece la invitación →
-   **Aceptar**.
-6. De vuelta en el portal del cliente, repartí las comunas. Por ejemplo:
-   - Envíos ZAS → `Maipú, Cerrillos`
-   - Rápido Ltda → `Ñuñoa`
-
-   **Guardar reglas** en cada tarjeta.
-7. Cargá dos pedidos de prueba: uno en **Maipú** y otro en **Providencia**.
-   - El de Maipú tiene que caer **directo a Envíos ZAS**.
-   - El de Providencia, que no cubre nadie, tiene que caer **al pool** y
-     verse desde las dos empresas.
-8. Tomá el de Providencia desde una de las dos y fijate que **desaparece** de
-   la otra.
-
-Cuando funcione esto, la red está andando.
+**No corras** `migracion-pool-empresas.sql`: está anulada, el archivo es solo un cartel.
 
 ---
 
-## 5. Lo que venía pendiente de antes
+## 2. Subir los paneles y hacer push
 
-- Re-deploy de `ml-notif` y `ml-backfill` si no están al día, y apretar
-  **🔄 Sincronizar envíos ML**.
-- **Commit + push** del repo (eso lo hacés vos desde tu terminal).
-- Instalar **ZAS-Reparto-v2.4.2-moderno.apk**. La APK **no necesita cambios**
-  por la red: el repartidor sigue viendo solo lo que le toca a él.
+Los archivos ya están en tu carpeta. Recordá que el sitio publica el **`index.html` de la raíz**, no `panel/`.
+
+```
+git add index.html panel-maestro.html panel/ supabase/ test-*.mjs PASOS-RED.md
+git add ZAS-Reparto-v2.6.0-moderno.apk ZAS-Reparto-v2.6.0-antiguo.apk
+git commit -m "v1.40 pedidos compartidos + mi carga + escaneo reclama"
+git push
+```
+
+Esperá ~1 minuto a que GitHub Pages reconstruya y entrá con **Ctrl+F5**.
 
 ---
 
-## 6. Cosas para decidir, sin apuro
+## 3. Instalar la APK
 
-- **Cobro**: el maestro muestra el plan, el uso del mes y el tope con su
-  barrita, pero **no bloquea** a nadie que se pase ni factura nada. Falta
-  decidir si cobrás por pedido, por plan fijo o mixto.
-- **Cuota diaria vs pool**: hoy la cuota limita el reparto **automático**,
-  no la toma del pool. Si todas las empresas pasaron su cuota, el pedido cae
-  al pool y cualquiera se lo puede llevar. Está así para que ningún pedido
-  quede trabado sin dueño. Si en la práctica molesta, se cambia.
-- **Plazo y tope de la red**: arrancan en 120 minutos y 30 pedidos. Cuando
-  veas cómo se comporta la gente en la pestaña **Conducta**, ajustalos desde
-  *Reglas de la red*.
+**`ZAS-Reparto-v2.6.0-moderno.apk`** en los teléfonos de los repartidores.
+(La `-antiguo` es solo para teléfonos viejos de 32 bits.)
+
+Sin esta versión el escaneo no reclama nada, así que los pedidos compartidos se quedan sin dueño.
+
+---
+
+## 4. Configurar (5 minutos, una sola vez)
+
+**En el panel maestro → Reglas de la red**: revisá abajo la caja **Zona de cobertura**. Tienen que estar las 52 comunas. Si repartís a alguna más, agregala ahí.
+
+**En el portal de cada cliente → Mis empresas de reparto**: elegí cómo quiere repartir.
+- **Por mis reglas**: le da comunas a cada empresa. Lo que no calza con nadie queda compartido.
+- **Abierto**: todos sus pedidos quedan a la vista de todas sus empresas y se los queda la que los cargue.
+
+---
+
+## 5. Probar que funciona
+
+1. Entrá al panel con tu cuenta. En **Pedidos** los que todavía no son de nadie salen marcados **🤝 compartido**.
+2. Seleccioná uno compartido y asignale un repartidor. Fijate que dice *"previsto"*: todavía no es tuyo.
+3. Entrá con la cuenta de Rapiditos: el mismo pedido le aparece a ella también, y puede asignarle **su** repartidor sin pisar el tuyo.
+4. Que un repartidor escanee esa etiqueta con la app. El pedido pasa a su empresa, se va a **📦 Mi carga**, y desaparece de la otra.
+5. En el panel de la empresa que lo perdió aparece la franja **📣 «salió de tu ruta»** diciendo quién se lo llevó.
+
+---
+
+## Cómo funciona ahora, en tres líneas
+
+- Un pedido fuera de la RM o sin comuna **no lo ve ninguna empresa**: solo el cliente.
+- Un pedido que las reglas del cliente le asignaron a una empresa **es de esa empresa**, nadie más lo ve ni lo puede escanear.
+- Todo lo demás queda **compartido**: todas lo ven, todas pueden planificarlo, y **se lo queda la empresa cuyo repartidor lo escanee**.
+
+---
+
+## Lo que sigue pendiente (no urgente)
+
+- Separar el panel en tres páginas: empresa, cliente y maestro. Hoy el archivo grande tiene el panel de empresa y el portal del cliente juntos.
+- Cobro por empresa: el maestro muestra plan, uso del mes y tope, pero **no bloquea ni factura**.
+- Dashboard de estadísticas.
+- WhatsApp automático (en pausa por lo de los socios).

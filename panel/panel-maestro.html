@@ -231,6 +231,22 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
           <span id="rEstado" class="mini" style="align-self:center"></span>
         </div>
       </div>
+
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:22px;max-width:640px;margin-top:16px">
+        <h3 style="margin-top:0">Zona de cobertura</h3>
+        <p class="mini">Las comunas donde reparte la red. Un pedido a una comuna que no esté en esta
+        lista queda <b>fuera de zona</b>: no se le asigna a nadie, no lo ve ninguna empresa y no se
+        puede escanear. Solo lo ve el cliente, para que lo despache por otro lado.</p>
+        <label>Comunas, separadas por coma</label>
+        <textarea id="rComunas" rows="7" placeholder="Maipú, Ñuñoa, Providencia…"></textarea>
+        <span class="mini" id="rComunasN"></span>
+        <div class="err" id="rComunasErr"></div>
+        <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+          <button class="btn" id="rComunasGuardar">Guardar zona</button>
+          <button class="btn btn-ghost" id="rComunasRm">Cargar las 52 de la RM</button>
+          <span id="rComunasEstado" class="mini" style="align-self:center"></span>
+        </div>
+      </div>
     </section>
 
     </div>
@@ -284,7 +300,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
 const SUPABASE_URL = 'https://racwaageoajxaxzqtjio.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJhY3dhYWdlb2FqeGF4enF0amlvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU1MzU3NjUsImV4cCI6MjEwMTExMTc2NX0.9SijMMVHYM2c6oYUc6mA62XpWw4Y2zf8d9HhalPSJWA';
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const VERSION = 'maestro v1.1';
+const VERSION = 'maestro v1.2';
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s??'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -339,6 +355,11 @@ async function cargarTodo(){
   movs = e7.data||[]; config = e8.data||{plazo_asignar_min:120, tope_sin_asignar:30};
   $('rPlazo').value = config.plazo_asignar_min;
   $('rTope').value  = config.tope_sin_asignar;
+  const cob = config.comunas_cobertura || [];
+  $('rComunas').value = cob.join(', ');
+  $('rComunasN').textContent = cob.length
+    ? cob.length + ' comunas cargadas'
+    : '⚠️ sin comunas cargadas: no se bloquea ningún pedido por zona';
   pintarEmpresas(); pintarClientes(); pintarConducta();
 }
 
@@ -557,6 +578,38 @@ $('rGuardar').onclick = async ()=>{
   if(error){ $('rErr').textContent=error.message; return; }
   $('rEstado').textContent = 'Guardado ✓';
   setTimeout(()=>$('rEstado').textContent='', 2500);
+  await cargarTodo();
+};
+
+/* ---------- zona de cobertura ---------- */
+const COMUNAS_RM = ['Cerrillos','Cerro Navia','Conchalí','El Bosque','Estación Central','Huechuraba',
+  'Independencia','La Cisterna','La Florida','La Granja','La Pintana','La Reina','Las Condes',
+  'Lo Barnechea','Lo Espejo','Lo Prado','Macul','Maipú','Ñuñoa','Pedro Aguirre Cerda','Peñalolén',
+  'Providencia','Pudahuel','Quilicura','Quinta Normal','Recoleta','Renca','San Joaquín','San Miguel',
+  'San Ramón','Santiago','Vitacura','Puente Alto','Pirque','San José de Maipo','Colina','Lampa',
+  'Tiltil','San Bernardo','Buin','Calera de Tango','Paine','Melipilla','Alhué','Curacaví',
+  'María Pinto','San Pedro','Talagante','El Monte','Isla de Maipo','Padre Hurtado','Peñaflor'];
+
+$('rComunasRm').onclick = ()=>{
+  $('rComunas').value = COMUNAS_RM.join(', ');
+  $('rComunasN').textContent = COMUNAS_RM.length + ' comunas listas para guardar';
+};
+
+$('rComunasGuardar').onclick = async ()=>{
+  const lista = $('rComunas').value.split(',').map(x=>x.trim()).filter(Boolean);
+  $('rComunasErr').textContent = '';
+  if(!lista.length && !confirm('Vas a dejar la zona vacía: con la lista vacía NO se bloquea ningún pedido por zona. ¿Seguro?')) return;
+  $('rComunasGuardar').disabled = true;
+  const { error } = await sb.from('config_red')
+    .update({ comunas_cobertura: lista, actualizado_en: new Date().toISOString() }).eq('id', 1);
+  $('rComunasGuardar').disabled = false;
+  if(error){
+    $('rComunasErr').textContent = /comunas_cobertura/.test(error.message)
+      ? 'Falta correr migracion-zona-cobertura.sql en Supabase.' : error.message;
+    return;
+  }
+  $('rComunasEstado').textContent = 'Guardado ✓ · ' + lista.length + ' comunas';
+  setTimeout(()=>$('rComunasEstado').textContent='', 3000);
   await cargarTodo();
 };
 

@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ZAS Reparto — Panel de Control</title>
-<!-- panel v1.39 -->
+<!-- panel v1.40 -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -140,7 +140,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     <nav>
       <button data-t="resumen" class="on">Resumen</button>
       <button data-t="pedidos">Pedidos</button>
-      <button data-t="pool" id="navPool" style="display:none">📥 Pool<span id="poolN" style="display:none;margin-left:5px;background:#0CA30C;color:#fff;border-radius:99px;font-size:10px;min-width:16px;height:16px;line-height:16px;text-align:center;padding:0 4px;font-weight:700;vertical-align:middle">0</span></button>
+      <button data-t="pool" id="navPool" style="display:none">📦 Mi carga<span id="poolN" style="display:none;margin-left:5px;background:#0CA30C;color:#fff;border-radius:99px;font-size:10px;min-width:16px;height:16px;line-height:16px;text-align:center;padding:0 4px;font-weight:700;vertical-align:middle">0</span></button>
       <button data-t="clientes">Clientes<span id="cliN" style="display:none;margin-left:5px;background:#d03b3b;color:#fff;border-radius:99px;font-size:10px;min-width:16px;height:16px;line-height:16px;text-align:center;padding:0 4px;font-weight:700;vertical-align:middle">0</span></button>
       <button data-t="repartidores">Repartidores</button>
       <button data-t="empresas" id="navEmpresas" style="display:none" title="Empresas de reparto que usan este sistema">🚚 Empresas</button>
@@ -156,6 +156,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
   </header>
 
   <main>
+    <div id="avisosRed" style="display:none;background:#FFF4E0;border:1px solid #F0D9A8;color:#7a5200;border-radius:10px;padding:10px 14px;margin-bottom:12px;font-size:13px"></div>
     <div id="avisoEmpresa" style="display:none;background:#EEF4FF;border:1px solid #C9DAF8;color:#1e3a6b;border-radius:10px;padding:9px 14px;margin-bottom:14px;font-size:12.5px"></div>
     <!-- Resumen -->
     <section id="t-resumen">
@@ -198,21 +199,18 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     <!-- Pool -->
     <section id="t-pool" style="display:none">
       <div class="bar">
-        <span style="color:var(--muted);font-size:13px">Pedidos <b>sin dueño</b>, a la vista de todas las empresas habilitadas. <b>Reservalos</b> para armar la ruta y asignarles repartidor; el escaneo en el galpón confirma que te los llevaste. Lo que no reserves nadie, se lo lleva el primero que lo escanee.</span>
+        <span style="color:var(--muted);font-size:13px">Los bultos que <b>tus repartidores ya escanearon</b>: son tuyos en firme y ninguna otra empresa los ve.</span>
         <span class="sp"></span>
         <select id="poolComuna" style="width:auto;min-width:150px" onchange="poolFiltrarComuna(this.value)"><option value="">Todas las comunas</option></select>
         <input type="search" id="poolBuscar" placeholder="Buscar cliente, dirección…" style="max-width:220px">
       </div>
-      <div id="poolBarra" style="display:none;background:var(--ink);color:#fff;border-radius:10px;padding:8px 14px;margin-bottom:10px;align-items:center;gap:10px">
-        <b id="poolSelN"></b>
-        <button class="btn" id="poolTomar" style="background:#0CA30C;border-color:#0CA30C" onclick="tomarSeleccionados()">📥 Reservar seleccionados</button>
-        <span class="sp" style="flex:1"></span>
-        <button class="btn btn-ghost" style="color:#fff;border-color:#666" onclick="poolLimpiar()">✕ Limpiar</button>
-      </div>
+      <div id="poolBarra" style="display:none"></div>
+      <span id="poolSelN" style="display:none"></span><span id="poolTomar" style="display:none"></span>
       <div id="poolReglas" style="display:none;margin-bottom:10px;padding:9px 14px;border-radius:10px;font-size:12.5px;background:#EEF4FF;border:1px solid #C9DAF8;color:#1e3a6b"></div>
       <div id="poolAviso" style="display:none;margin-bottom:10px;padding:10px 14px;border-radius:10px;font-size:13px"></div>
+      <div id="carRes" style="margin-bottom:10px;font-size:13px;color:var(--ink-2)"></div>
       <div class="tbl"><table id="tblPool">
-        <thead><tr><th><input type="checkbox" id="poolTodos" onclick="poolSeleccionarTodos(this.checked)"></th><th>Código</th><th>Empresa</th><th>Cliente final</th><th>Dirección</th><th>Comuna</th><th>Por qué está acá</th><th>Entró al pool</th><th></th></tr></thead>
+        <thead><tr><th>Código</th><th>Cliente</th><th>Cliente final</th><th>Dirección</th><th>Comuna</th><th>Repartidor</th><th>Estado</th><th>Cargado</th></tr></thead>
         <tbody id="tbodyPool"></tbody>
       </table></div>
     </section>
@@ -712,9 +710,13 @@ const EST = {
 };
 const FIN = ['entregado','cancelado','no_entregado'];
 let pedidos = [], perfiles = [], clientes = [], filtro = 'activos', busq = '', clienteEditando = null;
-/* ---- POOL / RED DE EMPRESAS DE REPARTO (v1.39) ---- */
+/* ---- RED DE EMPRESAS DE REPARTO (v1.40) ---- */
 let empresas = [], habilitaciones = [], poolPedidos = [];
 let miEmpresa = null, soySuper = false, HAY_POOL = false;
+/* v1.40 — planes de MI empresa sobre pedidos compartidos, y avisos */
+let misPlanes = [], avisosRed = [];
+const esCompartido = p => p && p.empresa_reparto_id == null;
+const planDe = id => misPlanes.find(x=>x.pedido_id===id) || null;
 /* v1.33: reglas de reparto del cliente y frenos anti-acaparamiento */
 let configRed = { plazo_asignar_min:120, tope_sin_asignar:30 };
 let poolSel = new Set(), poolComunaSel = '', poolBusq = '', empresaEditando = null;
@@ -1097,11 +1099,11 @@ function pintarEmpRed(){
       <div style="display:flex;gap:16px;margin-top:10px;flex-wrap:wrap">
         <label style="display:flex;gap:7px;align-items:flex-start;margin:0;cursor:pointer;max-width:330px">
           <input type="radio" name="modoRep" value="reglas" ${f.modo_reparto!=='pool'?'checked':''} onchange="empGuardarModo('reglas')" style="width:auto;margin-top:3px">
-          <span style="font-size:13px"><b>Por mis reglas</b><br><span class="cod">Cada empresa se lleva lo que le asignaste. Lo que no calza con nadie cae al pool y lo toma quien quiera.</span></span>
+          <span style="font-size:13px"><b>Por mis reglas</b><br><span class="cod">Cada empresa se lleva las comunas que le asignaste. Lo que no calza con nadie queda a la vista de todas y se lo lleva la que lo cargue.</span></span>
         </label>
         <label style="display:flex;gap:7px;align-items:flex-start;margin:0;cursor:pointer;max-width:330px">
-          <input type="radio" name="modoRep" value="pool" ${f.modo_reparto==='pool'?'checked':''} onchange="empGuardarModo('pool')" style="width:auto;margin-top:3px">
-          <span style="font-size:13px"><b>Pool libre</b><br><span class="cod">Todos tus pedidos quedan a la vista de tus empresas y se los lleva la primera que los tome.</span></span>
+          <input type="radio" name="modoRep" value="abierto" ${f.modo_reparto==='abierto'?'checked':''} onchange="empGuardarModo('abierto')" style="width:auto;margin-top:3px">
+          <span style="font-size:13px"><b>Abierto</b><br><span class="cod">Todos tus pedidos quedan a la vista de tus empresas y se los queda la que los cargue primero.</span></span>
         </label>
       </div>
 
@@ -1129,8 +1131,8 @@ function pintarEmpRed(){
       ${activas.length ? activas.map(tarjeta).join('') :
         '<div style="padding:24px;text-align:center;color:var(--muted);border:1px dashed var(--grid);border-radius:12px">Todavía no tenés ninguna empresa repartiendo. Sumá una acá abajo.</div>'}
     </div>
-    ${activas.length>1 && f.modo_reparto!=='pool' ? `<div style="font-size:12.5px;color:var(--ink-2);margin:4px 0 12px">
-      💡 Si dos empresas calzan igual para una comuna y no pusiste porcentajes ni prioridades, el pedido cae al pool y se lo lleva la que lo tome primero.
+    ${activas.length>1 && f.modo_reparto!=='abierto' ? `<div style="font-size:12.5px;color:var(--ink-2);margin:4px 0 12px">
+      💡 Si dos empresas calzan igual para una comuna y no pusiste porcentajes ni prioridades, el pedido queda a la vista de las dos y se lo lleva la que lo cargue primero.
     </div>`:''}
 
     ${sinVinculo.length ? `<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px;margin-top:6px">
@@ -1149,7 +1151,7 @@ function pintarEmpRed(){
 window.empGuardarModo = async (modo)=>{
   const { error } = await sb.from('clientes').update({ modo_reparto: modo }).eq('id', empCliId);
   if(error){ toast('⚠️ '+error.message); return; }
-  toast(modo==='pool' ? '✅ Ahora todo va al pool' : '✅ Ahora se reparte por tus reglas');
+  toast(modo==='abierto' ? '✅ Ahora se lo lleva la empresa que lo cargue' : '✅ Ahora se reparte por tus reglas');
   await cargarEmpRed();
 };
 
@@ -1804,9 +1806,8 @@ $('autoGo').onclick = async ()=>{
     for(let g=0; g<elegidos.length; g++){
       if(!grupos[g].length) continue;
       const ids = grupos[g].map(p=>p.id);
-      const { error } = await sb.from('pedidos')
-        .update({repartidor_id: elegidos[g], estado:'asignado'}).in('id', ids);
-      if(error) throw new Error(error.message);
+      const r = await asignarRepartidorA(ids, elegidos[g]);
+      if(r.errores.length) throw new Error(r.errores[0]);
       // orden preliminar de ruta por cercanía (después se afina con OSRM en Mapa)
       const ordenados = ordenarGrupoPorCercania(grupos[g]);
       for(let k=0; k<ordenados.length; k++){
@@ -2051,7 +2052,7 @@ async function cargarTodo(){
   // si hay pedidos tomados y sin repartidor a los que se les pasó la hora,
   // vuelven solos al pool antes de que miremos nada
   try { await sb.rpc('liberar_vencidos'); } catch(_){}
-  const [p1,p2,p3,p4,p5,p6,p7] = await Promise.all([
+  const [p1,p2,p3,p4,p5,p6,p7,p8,p9] = await Promise.all([
     sb.from('perfiles').select().order('nombre'),
     sb.from('pedidos').select().order('creado_en',{ascending:false}).limit(1000),
     sb.from('clientes').select().order('nombre'),
@@ -2062,7 +2063,11 @@ async function cargarTodo(){
     // no está corrida, esto da error. Si está, no da error AUNQUE no haya
     // ningún pedido — que es el caso de una empresa recién creada.
     sb.from('pedidos').select('id,empresa_reparto_id').limit(1),
+    sb.from('plan_reparto').select(),
+    sb.from('avisos_red').select().eq('visto', false).order('creado_en',{ascending:false}).limit(50),
   ]);
+  misPlanes = p8 && !p8.error ? (p8.data||[]) : [];
+  avisosRed = p9 && !p9.error ? (p9.data||[]) : [];
   perfiles = p1.data||[]; clientes = p3.data||[];
   empresas = p4.data||[]; habilitaciones = p5.data||[];
   clientesRed = clientes;
@@ -2104,18 +2109,21 @@ async function cargarTodo(){
   pintar();
 }
 
-/* separa lo que ya es de mi empresa de lo que sigue libre en el pool */
+/* v1.40 — YA NO HAY POOL COMO PESTAÑA APARTE.
+   · Pedidos   = lo que puedo repartir hoy: lo mío sin cargar + lo compartido
+   · Mi carga  = lo mío que un repartidor ya escaneó (poolPedidos)
+   Los compartidos van mezclados en Pedidos y se marcan en la tabla. */
 function repartirPedidos(todos){
   if(!HAY_POOL){ pedidos = todos; poolPedidos = []; return; }
-  pedidos     = todos.filter(p=>p.empresa_reparto_id != null);
-  poolPedidos = todos.filter(p=>p.empresa_reparto_id == null);
+  pedidos     = todos.filter(p=> !p.cargado_en);
+  poolPedidos = todos.filter(p=>  p.cargado_en && p.empresa_reparto_id != null);
 }
 /* mete un pedido que llegó por tiempo real en la lista que le toca */
 const porFecha = (a,b)=> String(b.creado_en||'').localeCompare(String(a.creado_en||''));
 function ubicarPedido(row){
   pedidos     = pedidos.filter(p=>p.id!==row.id);
   poolPedidos = poolPedidos.filter(p=>p.id!==row.id);
-  if(HAY_POOL && row.empresa_reparto_id == null){ poolPedidos.push(row); poolPedidos.sort(porFecha); }
+  if(HAY_POOL && row.cargado_en && row.empresa_reparto_id != null){ poolPedidos.push(row); poolPedidos.sort(porFecha); }
   else { pedidos.push(row); pedidos.sort(porFecha); }
 }
 let yaSuscrito = false;
@@ -2143,7 +2151,7 @@ function suscribir(){
 /* ---------- PINTAR ---------- */
 function pintar(){
   pintarTiles(); pintarPedidos(); pintarRendimiento(); pintarReps(); pintarClientes();
-  if(HAY_POOL){ pintarPool(); pintarEmpresas(); pintarReloj(); pintarVinculosPendientes(); }
+  if(HAY_POOL){ pintarPool(); pintarEmpresas(); pintarReloj(); pintarVinculosPendientes(); pintarAvisos(); }
   if(mapa && $('t-mapa').style.display!=='none'){ poblarSelectorRuta(); dibujarRuta(); }
 }
 
@@ -2240,8 +2248,14 @@ function pintarPedidos(){
       <td>${esc(p.direccion)}</td>
       <td>${p.comuna? esc(p.comuna) : '<span class="cod">—</span>'}</td>
       <td>${p.cliente_id? esc(clienteDe(p.cliente_id)||'…') : '<span class="cod">—</span>'}</td>
-      <td>${p.repartidor_id? esc(nombreDe(p.repartidor_id)) : '<span class="cod">—</span>'}</td>
-      <td>${stChip(p.estado)}</td>
+      <td>${(()=>{ const pl = esCompartido(p) ? planDe(p.id) : null;
+        if(esCompartido(p)) return pl && pl.repartidor_id
+          ? esc(nombreDe(pl.repartidor_id)) + ' <span class="cod">(previsto)</span>'
+          : '<span class="cod">—</span>';
+        return p.repartidor_id ? esc(nombreDe(p.repartidor_id)) : '<span class="cod">—</span>'; })()}</td>
+      <td>${esCompartido(p)
+        ? '<span class="st" style="background:#EEF4FF;color:#1e3a6b;border-radius:99px;padding:2px 9px;font-size:11px;font-weight:700" title="Todavía no es tuyo: se lo queda la empresa cuyo repartidor lo escanee">🤝 compartido</span>'
+        : stChip(p.estado)}</td>
       <td class="cod">${fechaHora(p.creado_en)}</td>
       <td><a class="btn btn-ghost" style="padding:4px 10px;text-decoration:none" target="_blank" title="Ver dirección en Google Maps"
         onclick="event.stopPropagation()"
@@ -2513,6 +2527,31 @@ window.pedirClienteDesdeFicha = async (id)=>{
   await cargarTodo();
 };
 
+/* v1.40 — asignar un repartidor.
+   Un pedido COMPARTIDO todavía no es mío: si le escribiera el repartidor
+   encima, se lo pisaría a la otra empresa. Por eso va a plan_reparto, que
+   guarda una fila por empresa. Recién al escanearlo pasa a ser mío. */
+async function asignarRepartidorA(ids, rep){
+  const mios        = ids.filter(id => { const p = pedidos.find(x=>x.id===id); return p && !esCompartido(p); });
+  const compartidos = ids.filter(id => { const p = pedidos.find(x=>x.id===id); return p &&  esCompartido(p); });
+  let n = 0, errores = [];
+
+  if(mios.length){
+    const { error } = await sb.from('pedidos')
+      .update({ repartidor_id: rep, estado: 'asignado' })
+      .in('id', mios)
+      .not('estado','in','("entregado","cancelado")');
+    if(error) errores.push(error.message); else n += mios.length;
+  }
+  if(compartidos.length){
+    const { data, error } = await sb.rpc('planificar_pedidos', { p_ids: compartidos, p_repartidor: rep || null });
+    if(error) errores.push(/planificar_pedidos/.test(error.message)
+      ? 'Falta correr migracion-plan-y-carga.sql en Supabase.' : error.message);
+    else n += (data?.planificados || 0);
+  }
+  return { n, compartidos: compartidos.length, errores };
+}
+
 /* ---------- SELECCIÓN Y ACCIONES MASIVAS ---------- */
 const seleccion = new Set();
 let ultimaListaFiltrada = [];
@@ -2535,12 +2574,10 @@ $('masivaAsignar').onclick = async ()=>{
   const rep = $('masivaRep').value;
   if(!rep){ toast('Elige un repartidor primero'); return; }
   const ids = [...seleccion];
-  const { error } = await sb.from('pedidos')
-    .update({repartidor_id: rep, estado: 'asignado'})
-    .in('id', ids)
-    .not('estado','in','("entregado","cancelado")');
-  if(error){ toast('Error: '+error.message); return; }
-  toast(ids.length+' pedidos asignados a '+nombreDe(rep));
+  const r = await asignarRepartidorA(ids, rep);
+  if(r.errores.length){ toast('Error: '+r.errores[0]); return; }
+  toast(`${r.n} pedidos asignados a ${nombreDe(rep)}` +
+        (r.compartidos ? ` · ${r.compartidos} todavía compartidos: son tuyos recién cuando los escanee` : ''));
   limpiarSeleccion(); cargarTodo();
 };
 $('masivaDesasignar').onclick = async ()=>{
@@ -2739,8 +2776,13 @@ window.corregirDireccionPedido = async (id)=>{
 
 window.asignar = async (id)=>{
   const rep = $('dRep').value; if(!rep){ toast('Elige un repartidor'); return; }
-  const { error } = await sb.from('pedidos').update({repartidor_id:rep, estado:'asignado'}).eq('id',id);
-  if(error) toast('Error: '+error.message); else { cerrar('mDet'); toast('Pedido asignado a '+nombreDe(rep)); }
+  const r = await asignarRepartidorA([id], rep);
+  if(r.errores.length){ toast('Error: '+r.errores[0]); return; }
+  cerrar('mDet');
+  toast(r.compartidos
+    ? 'Previsto para '+nombreDe(rep)+' — será tuyo cuando lo escanee'
+    : 'Pedido asignado a '+nombreDe(rep));
+  cargarTodo();
 };
 window.cambiarEstado = async (id, e)=>{
   const { error } = await sb.from('pedidos').update({estado:e}).eq('id',id);
@@ -2863,19 +2905,22 @@ function pintarPool(){
   }
 
   const lista = poolListaVisible();
+  const res = $('carRes');
+  if(res) res.innerHTML = poolPedidos.length
+    ? `<b>${poolPedidos.length}</b> ${poolPedidos.length===1?'bulto cargado':'bultos cargados'} hoy y en los días recientes.`
+    : '';
   $('tbodyPool').innerHTML = lista.length ? lista.map(p=>`
-    <tr>
-      <td onclick="event.stopPropagation()"><input type="checkbox" ${poolSel.has(p.id)?'checked':''} onchange="poolAlternar(${p.id}, this.checked)"></td>
+    <tr onclick="verDetalle(${p.id})">
       <td class="cod">${esc(p.codigo||'#'+p.id)}${p.origen==='jumpseller'?' <span style="color:#1baf7a" title="Jumpseller">⚡</span>':''}${p.origen==='mercadolibre'?' <span style="color:#3483fa;font-weight:800" title="MercadoLibre Flex">Ⓜ</span>':''}</td>
       <td>${p.cliente_id? esc(clienteDe(p.cliente_id)||'…') : '<span class="cod">—</span>'}</td>
       <td><b>${esc(p.cliente_nombre)}</b></td>
       <td>${esc(p.direccion)}</td>
       <td>${p.comuna? esc(p.comuna) : '<span class="cod">—</span>'}</td>
-      <td style="font-size:12px;color:var(--ink-2);max-width:230px">${esc(p.asignacion_motivo||'—')}</td>
-      <td class="cod">${fechaHora(p.creado_en)}</td>
-      <td><button class="btn" style="padding:4px 12px;background:#0CA30C;border-color:#0CA30C" onclick="tomarDelPool([${p.id}])">📥 Reservar</button></td>
+      <td>${p.repartidor_id? esc(nombreDe(p.repartidor_id)) : '<span class="cod">—</span>'}</td>
+      <td>${stChip(p.estado)}</td>
+      <td class="cod">${fechaHora(p.cargado_en)}</td>
     </tr>`).join('')
-    : `<tr><td colspan="9" class="empty">${n? 'Ningún pedido del pool calza con este filtro.' : 'El pool está vacío: no hay pedidos esperando dueño.'}</td></tr>`;
+    : `<tr><td colspan="8" class="empty">${n? 'Ningún bulto cargado calza con este filtro.' : 'Todavía no cargaste ningún bulto. Aparecen acá cuando tus repartidores escanean las etiquetas.'}</td></tr>`;
 
   pintarReglasPool();
 
@@ -2972,6 +3017,28 @@ function pintarReloj(){
 }
 
 /* aviso arriba del pool: cuánto podés llevarte todavía */
+/* los pedidos que otra empresa cargó primero */
+function pintarAvisos(){
+  const caja = $('avisosRed');
+  if(!caja) return;
+  if(!avisosRed.length){ caja.style.display='none'; return; }
+  caja.style.display='block';
+  const lista = avisosRed.slice(0,6);
+  caja.innerHTML = `<b>📣 ${avisosRed.length} ${avisosRed.length===1?'pedido salió':'pedidos salieron'} de tus rutas</b>`
+    + '<div style="margin-top:6px;display:flex;flex-direction:column;gap:3px">'
+    + lista.map(a=>`<div>· ${esc(a.texto)}</div>`).join('')
+    + (avisosRed.length>lista.length ? `<div class="cod">…y ${avisosRed.length-lista.length} más</div>` : '')
+    + '</div>'
+    + '<button class="btn btn-ghost" style="margin-top:8px;padding:3px 12px;font-size:12px" onclick="marcarAvisosVistos()">Entendido</button>';
+}
+
+window.marcarAvisosVistos = async ()=>{
+  const ids = avisosRed.map(a=>a.id);
+  if(!ids.length) return;
+  await sb.from('avisos_red').update({visto:true}).in('id', ids);
+  avisosRed = []; pintarAvisos();
+};
+
 function pintarReglasPool(){
   const caja = $('poolReglas');
   if(!caja) return;
@@ -2979,10 +3046,7 @@ function pintarReglasPool(){
   if(!ids.length){ caja.style.display='none'; return; }
   const nombres = ids.map(id=>clienteDe(id)).filter(Boolean);
   caja.style.display='block';
-  caja.innerHTML = '📦 <b>' + poolPedidos.length + (poolPedidos.length===1?' pedido esperando' : ' pedidos esperando') + '</b>'
-    + (nombres.length ? ' de ' + nombres.map(esc).join(', ') : '')
-    + '.<br><span style="opacity:.85"><b>Reservá</b> los que vas a llevar para poder armarles la ruta y asignarles repartidor. '
-    + 'El escaneo en el galpón confirma la carga. Los que no reserve nadie se los lleva la empresa cuyo repartidor los escanee primero.</span>';
+  caja.style.display='none';
 }
 
 /* solicitudes de vínculo esperando respuesta */
@@ -3163,7 +3227,7 @@ function pintarEmpresasDelCliente(){
   pintarReglasDelCliente();
   const est = $('cEmpresasEstado');
   est.innerHTML = mias.length>1
-    ? `<span style="color:#8a6100">⚖️ Con ${mias.length} empresas, el reparto lo decide el cliente con sus reglas. Lo que no calza con ninguna cae al <b>pool</b>.</span>`
+    ? `<span style="color:#8a6100">⚖️ Con ${mias.length} empresas, el reparto lo decide el cliente con sus reglas. Lo que no calza con ninguna queda <b>compartido</b> hasta que alguien lo cargue.</span>`
     : mias.length===1
       ? '<span style="color:#006300">Los pedidos le llegan directo a esa empresa.</span>'
       : '<span style="color:#d03b3b">⚠️ Sin ninguna marcada, sus pedidos quedan en el pool sin que nadie pueda verlos.</span>';
@@ -3176,9 +3240,9 @@ function pintarReglasDelCliente(){
   if(!cli){ caja.innerHTML=''; return; }
   const vs = habilitaciones.filter(h=>h.cliente_id===clienteEditando);
   const nomE = id => (empresas.find(e=>e.id===id)||{}).nombre || ('empresa #'+id);
-  const modo = cli.modo_reparto === 'pool'
-    ? 'todo al <b>pool libre</b>: se lo lleva quien lo tome primero'
-    : 'reparto <b>por reglas</b>, y lo que no calza cae al pool';
+  const modo = cli.modo_reparto === 'abierto'
+    ? '<b>abierto</b>: se lo lleva la empresa que lo cargue primero'
+    : 'reparto <b>por reglas</b>, y lo que no calza queda a la vista de todas';
   const filas = vs.map(v=>{
     const r = [];
     if(v.comunas && v.comunas.length) r.push('comunas: '+v.comunas.join(', '));
