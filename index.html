@@ -205,7 +205,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         <select id="masivaRep" style="width:auto;padding:6px 8px"></select>
         <button class="btn" id="masivaAsignar">Asignar</button>
         <button class="btn btn-ghost" style="color:#fff;border-color:#666" id="masivaDesasignar">Quitar asignación</button>
-        <button class="btn btn-ghost" style="color:#9dd0ff;border-color:#456" id="masivaDevolver" title="Los suelta para que los pueda tomar otra empresa">📤 Devolver al pool</button>
+        <button class="btn btn-ghost" style="color:#9dd0ff;border-color:#456" id="masivaDevolver" title="Dejan de ser tuyos: vuelven a quedar a la vista de las otras empresas del cliente">🤝 Soltar</button>
         <button class="btn btn-ghost" style="color:#ff9d9d;border-color:#844" id="masivaCancelar">🚫 Cancelar</button>
         <span class="sp" style="flex:1"></span>
         <button class="btn btn-ghost" style="color:#fff;border-color:#666" onclick="limpiarSeleccion()">✕ Limpiar</button>
@@ -216,13 +216,13 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       </table></div>
     </section>
 
-    <!-- Pool -->
+    <!-- Mi carga: los bultos que ya escanearon mis repartidores -->
     <section id="t-pool" style="display:none">
       <div class="bar">
         <span style="color:var(--muted);font-size:13px">Los bultos que <b>tus repartidores ya escanearon</b>: son tuyos en firme y ninguna otra empresa los ve.</span>
         <span class="sp"></span>
         <select id="poolComuna" style="width:auto;min-width:150px" onchange="poolFiltrarComuna(this.value)"><option value="">Todas las comunas</option></select>
-        <input type="search" id="poolBuscar" placeholder="Buscar cliente, dirección…" style="max-width:220px">
+        <input type="search" id="poolBuscar" placeholder="Buscar cliente, dirección, n° de envío…" style="max-width:220px">
       </div>
       <div id="poolBarra" style="display:none"></div>
       <span id="poolSelN" style="display:none"></span><span id="poolTomar" style="display:none"></span>
@@ -230,7 +230,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       <div id="poolAviso" style="display:none;margin-bottom:10px;padding:10px 14px;border-radius:10px;font-size:13px"></div>
       <div id="carRes" style="margin-bottom:10px;font-size:13px;color:var(--ink-2)"></div>
       <div class="tbl"><table id="tblPool">
-        <thead><tr><th>Código</th><th>Cliente</th><th>Cliente final</th><th>Dirección</th><th>Comuna</th><th>Repartidor</th><th>Estado</th><th>Cargado</th></tr></thead>
+        <thead><tr><th>N° de envío</th><th>Cliente</th><th>Cliente final</th><th>Dirección</th><th>Comuna</th><th>Repartidor</th><th>Estado</th><th>Cargado</th></tr></thead>
         <tbody id="tbodyPool"></tbody>
       </table></div>
     </section>
@@ -548,7 +548,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
   <div id="epCuentaBox" style="display:none;margin-top:12px;padding:14px;background:#eef6ff;border:1px solid #cfe3f7;border-radius:10px">
     <b style="font-size:13px">👤 Cuenta de administrador de esta empresa</b>
     <p style="color:var(--ink-2);font-size:12px;margin:6px 0 2px">
-      Con esta cuenta el dueño de la empresa entra al panel, ve el pool, toma pedidos y administra a su propia gente.
+      Con esta cuenta el dueño de la empresa entra a su panel, ve los pedidos compartidos de sus clientes y administra a su propia gente.
     </p>
     <div id="epCuentaLista" style="font-size:12px;margin:6px 0"></div>
     <div class="cols">
@@ -599,7 +599,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     <b style="font-size:13px">🚚 Empresas de reparto que pueden repartirle</b>
     <p style="color:var(--ink-2);font-size:12px;margin:6px 0 8px">
       Marca quiénes ven los pedidos de este cliente. Con <b>una sola</b> marcada, los pedidos le llegan directo.
-      Con <b>dos o más</b>, entran al <b>pool</b> y se los queda la primera que los tome.
+      Con <b>dos o más</b>, quedan <b>compartidos</b> y se los queda la primera que los cargue escaneándolos.
     </p>
     <div id="cEmpresasLista" style="display:flex;flex-direction:column;gap:6px"></div>
     <div id="cEmpresasEstado" style="font-size:12px;margin-top:8px;min-height:16px"></div>
@@ -1206,7 +1206,7 @@ function pintarEmpRed(){
           <div>
             <label style="font-size:12px">Minutos para asignarle repartidor</label>
             <input id="empPlazo" type="number" min="10" max="${plazoRed}" value="${plazo}">
-            <span class="cod">Máximo permitido: ${plazoRed}. Pasado ese rato el pedido vuelve al pool.</span>
+            <span class="cod">Máximo permitido: ${plazoRed}. Pasado ese rato el pedido vuelve a quedar compartido.</span>
           </div>
           <div>
             <label style="font-size:12px">Máximo de pedidos tomados sin repartidor</label>
@@ -2190,7 +2190,7 @@ window.imprimirManifiesto = ()=>{
 /* ---------- DATOS ---------- */
 async function cargarTodo(){
   // si hay pedidos tomados y sin repartidor a los que se les pasó la hora,
-  // vuelven solos al pool antes de que miremos nada
+  // vuelven solos a quedar compartidos antes de que miremos nada
   try { await sb.rpc('liberar_vencidos'); } catch(_){}
   const [p1,p2,p3,p4,p5,p6,p7,p8,p9] = await Promise.all([
     sb.from('perfiles').select().order('nombre'),
@@ -2276,7 +2276,7 @@ function suscribir(){
         pedidos = pedidos.filter(p=>p.id!==payload.old.id);
         poolPedidos = poolPedidos.filter(p=>p.id!==payload.old.id);
       } else {
-        // si otra empresa lo tomó, se va del pool solo (y avisamos si lo tenía marcado)
+        // si otra empresa lo cargó, se va solo de la lista (y avisamos si lo tenía marcado)
         if(HAY_POOL && payload.eventType==='UPDATE' && poolSel.has(payload.new.id)
            && payload.new.empresa_reparto_id != null){
           poolSel.delete(payload.new.id);
@@ -2836,27 +2836,61 @@ $('masivaAsignar').onclick = async ()=>{
         (r.compartidos ? ` · ${r.compartidos} todavía compartidos: son tuyos recién cuando los escanee` : ''));
   limpiarSeleccion(); cargarTodo();
 };
+/* 🐛 v1.43 — QUITAR LA ASIGNACIÓN, LA CONTRACARA DE asignarRepartidorA().
+   Un pedido compartido no guarda su repartidor en `pedidos`, sino en
+   `plan_reparto` (por eso dice «previsto»). Antes, «Quitar asignación» solo
+   tocaba `pedidos`: el plan quedaba vivo y el «previsto» no se iba nunca.
+   Ahora se borran los dos lados. */
+async function quitarAsignacionA(ids){
+  const mios        = ids.filter(id => { const p = pedidos.find(x=>x.id===id); return p && !esCompartido(p); });
+  const compartidos = ids.filter(id => { const p = pedidos.find(x=>x.id===id); return p &&  esCompartido(p); });
+  let n = 0, previstos = 0, errores = [];
+
+  if(mios.length){
+    let { data, error } = await sb.from('pedidos')
+      .update({repartidor_id: null, estado: 'pendiente', ruta_orden: null})
+      .in('id', mios)
+      .not('estado','in','("entregado","cancelado","no_entregado")')
+      .select('id');
+    if(error && /ruta_orden/.test(error.message)){
+      ({ data, error } = await sb.from('pedidos')
+        .update({repartidor_id: null, estado: 'pendiente'})
+        .in('id', mios)
+        .not('estado','in','("entregado","cancelado","no_entregado")')
+        .select('id'));
+    }
+    if(error) errores.push(error.message); else n += (data||[]).length;
+  }
+
+  if(compartidos.length){
+    const { data, error } = await sb.rpc('desplanificar_pedidos', { p_ids: compartidos });
+    if(error) errores.push(/desplanificar_pedidos/.test(error.message)
+      ? 'Falta correr migracion-plan-y-carga.sql en Supabase.' : error.message);
+    else {
+      previstos = (data?.sacados ?? compartidos.length);
+      n += previstos;
+      // que el «previsto» desaparezca en el acto, sin esperar la recarga
+      misPlanes = misPlanes.filter(pl => !compartidos.includes(pl.pedido_id));
+    }
+  }
+  return { n, previstos, errores };
+}
+
 $('masivaDesasignar').onclick = async ()=>{
   const ids = [...seleccion];
-  let { error } = await sb.from('pedidos')
-    .update({repartidor_id: null, estado: 'pendiente', ruta_orden: null})
-    .in('id', ids)
-    .not('estado','in','("entregado","cancelado","no_entregado")');
-  if(error && /ruta_orden/.test(error.message)){
-    ({ error } = await sb.from('pedidos')
-      .update({repartidor_id: null, estado: 'pendiente'})
-      .in('id', ids)
-      .not('estado','in','("entregado","cancelado","no_entregado")'));
-  }
-  if(error){ toast('Error: '+error.message); return; }
-  toast('Asignación quitada — quedaron pendientes');
+  if(!ids.length) return;
+  const r = await quitarAsignacionA(ids);
+  if(r.errores.length){ toast('Error: '+r.errores[0]); return; }
+  toast(`Asignación quitada a ${r.n} pedido(s)` +
+        (r.previstos ? ` · ${r.previstos} dejaron de estar previstos` : '') +
+        ' — quedaron pendientes');
   limpiarSeleccion(); cargarTodo();
 };
 
 $('masivaDevolver').onclick = async ()=>{
   const ids = [...seleccion];
   if(!ids.length) return;
-  if(!confirm(`¿Devolver ${ids.length} pedido(s) al pool?\n\nDejan de ser tuyos y cualquier empresa habilitada por ese cliente se los puede llevar. Los que ya van en ruta no se pueden soltar.`)) return;
+  if(!confirm(`¿Soltar ${ids.length} pedido(s)?\n\nDejan de ser tuyos y vuelven a quedar COMPARTIDOS: cualquier empresa habilitada por ese cliente se los puede llevar cargándolos. Los que ya van en ruta no se pueden soltar.`)) return;
   const { data, error } = await sb.rpc('devolver_pedidos', { p_ids: ids, p_nota: 'devueltos en lote desde el panel' });
   if(error){
     toast(/devolver_pedidos/.test(error.message)
@@ -2867,7 +2901,7 @@ $('masivaDevolver').onclick = async ()=>{
   const n = data?.devueltos || 0;
   const noPudo = data?.no_pudo || [];
   toast(n
-    ? `📤 ${n} ${n===1?'pedido devuelto':'pedidos devueltos'} al pool` +
+    ? `🤝 ${n} ${n===1?'pedido soltado':'pedidos soltados'}: quedaron compartidos` +
       (noPudo.length ? ` · ${noPudo.length} no se pudo` : '')
     : `No se pudo devolver ninguno: ${noPudo[0]?.motivo || 'revisá el estado'}`);
   limpiarSeleccion(); cargarTodo();
@@ -2975,10 +3009,10 @@ window.verDetalle = async (id)=>{
         <button class="btn btn-ghost" onclick="reintentar(${p.id})">♻️ Volver a pendiente (sin repartidor)</button>`:''}
       ${p.estado==='no_entregado'?`<button class="btn btn-ghost" onclick="cambiarEstado(${p.id},'en_camino')">⏪ Volver a "En camino"</button>`:''}
       ${HAY_POOL && p.empresa_reparto_id && (['pendiente','asignado'].includes(p.estado) || (soySuper && !FIN.includes(p.estado)))
-        ? `<button class="btn btn-ghost" style="color:#8a6100;border-color:#e0cf9a" title="Lo suelta para que lo pueda tomar otra empresa" onclick="devolverAlPool(${p.id})">📤 Devolver al pool${soySuper && !['pendiente','asignado'].includes(p.estado)?' (forzar)':''}</button>`:''}
+        ? `<button class="btn btn-ghost" style="color:#8a6100;border-color:#e0cf9a" title="Deja de ser tuyo y vuelve a quedar a la vista de las otras empresas del cliente" onclick="devolverAlPool(${p.id})">🤝 Soltar el pedido${soySuper && !['pendiente','asignado'].includes(p.estado)?' (forzar)':''}</button>`:''}
     </div>
     ${HAY_POOL && p.empresa_reparto_id && !['pendiente','asignado'].includes(p.estado) && !FIN.includes(p.estado)
-      ? `<div class="cod" style="margin-top:6px">Ya va en ruta${soySuper?': solo tú puedes forzar la devolución.':': no se puede devolver al pool.'}</div>` : ''}
+      ? `<div class="cod" style="margin-top:6px">Ya va en ruta${soySuper?': solo tú puedes forzar que lo suelte.':': no se puede soltar.'}</div>` : ''}
     ${prueba ? `
     <div style="margin-top:14px;padding:14px;background:#f2faf2;border:1px solid #cde8cd;border-radius:12px">
       <b style="font-size:13px;color:#0a6b0a">✅ Prueba de entrega</b>
@@ -3049,8 +3083,11 @@ window.reintentar = async (id)=>{
   if(error) toast('Error: '+error.message); else { cerrar('mDet'); toast('Pedido devuelto a pendientes'); }
 };
 window.desasignar = async (id)=>{
-  const { error } = await sb.from('pedidos').update({repartidor_id:null, estado:'pendiente'}).eq('id',id);
-  if(error) toast('Error: '+error.message); else { cerrar('mDet'); toast('Asignación quitada'); }
+  const r = await quitarAsignacionA([id]);
+  if(r.errores.length){ toast('Error: '+r.errores[0]); return; }
+  cerrar('mDet');
+  toast(r.previstos ? 'Ya no está previsto para nadie' : 'Asignación quitada');
+  cargarTodo();
 };
 
 $('nuevoRep').onclick = ()=>{ ['rNombre','rEmail','rPass','rTel','rDir'].forEach(i=>$(i).value=''); $('rErr').textContent=''; $('mRep').classList.add('on'); $('rNombre').focus(); };
@@ -3170,7 +3207,8 @@ function poolListaVisible(){
   return poolPedidos.filter(p=>{
     if(poolComunaSel && (p.comuna||'') !== poolComunaSel) return false;
     if(!q) return true;
-    return [p.codigo,p.externo_id||'',p.cliente_nombre,p.direccion,p.comuna,clienteDe(p.cliente_id)||'']
+    return [numeroDeEnvioTxt(p),p.envio_id||'',p.codigo||'',p.externo_id||'',
+            p.cliente_nombre,p.direccion,p.comuna,clienteDe(p.cliente_id)||'']
       .join(' ').toLowerCase().includes(q);
   });
 }
@@ -3198,7 +3236,7 @@ function pintarPool(){
     : '';
   $('tbodyPool').innerHTML = lista.length ? lista.map(p=>`
     <tr onclick="verDetalle(${p.id})">
-      <td class="cod">${esc(p.codigo||'#'+p.id)}${p.origen==='jumpseller'?' <span style="color:#1baf7a" title="Jumpseller">⚡</span>':''}${p.origen==='mercadolibre'?' <span style="color:#3483fa;font-weight:800" title="MercadoLibre Flex">Ⓜ</span>':''}</td>
+      <td class="cod">${numeroDeEnvio(p)}</td>
       <td>${p.cliente_id? esc(clienteDe(p.cliente_id)||'…') : '<span class="cod">—</span>'}</td>
       <td><b>${esc(p.cliente_nombre)}</b></td>
       <td>${esc(p.direccion)}</td>
@@ -3251,10 +3289,10 @@ window.tomarDelPool = async (ids)=>{
 };
 
 window.devolverAlPool = async (id)=>{
-  if(!confirm('¿Devolver este pedido al pool? Queda libre para que lo tome otra empresa.')) return;
+  if(!confirm('¿Soltar este pedido?\n\nDeja de ser tuyo y queda compartido: se lo lleva la empresa que lo cargue.')) return;
   const { data, error } = await sb.rpc('devolver_pedidos', { p_ids:[id], p_nota:null });
   if(error){ toast('Error: '+error.message); return; }
-  if(data?.devueltos){ cerrar('mDet'); toast('Pedido devuelto al pool'); }
+  if(data?.devueltos){ cerrar('mDet'); toast('Pedido soltado: quedó compartido'); }
   else toast((data?.no_pudo?.[0]?.motivo) ? 'No se puede: '+data.no_pudo[0].motivo : 'No se pudo devolver');
   await cargarTodo();
 };
@@ -3297,9 +3335,9 @@ function pintarReloj(){
   const vencidos = conReloj.filter(p=>{ const m = minutosRestantes(p); return m!==null && m <= 0; });
   caja.style.display='block';
   caja.innerHTML = vencidos.length
-    ? `<b>⏰ ${vencidos.length} ${vencidos.length===1?'pedido volvió':'pedidos volvieron'} al pool</b> por no tener repartidor a tiempo. Actualizá la página para verlo.`
+    ? `<b>⏰ ${vencidos.length} ${vencidos.length===1?'pedido volvió a quedar compartido':'pedidos volvieron a quedar compartidos'}</b> por no tener repartidor a tiempo. Actualizá la página para verlo.`
     : urgentes.length
-      ? `<b>⏳ ${urgentes.length} ${urgentes.length===1?'pedido está':'pedidos están'} por vencerse:</b> si no les asignás repartidor, vuelven al pool y otra empresa se los puede llevar.`
+      ? `<b>⏳ ${urgentes.length} ${urgentes.length===1?'pedido está':'pedidos están'} por vencerse:</b> si no les asignás repartidor, vuelven a quedar compartidos y otra empresa se los puede llevar.`
       : `⏳ Tenés <b>${conReloj.length}</b> ${conReloj.length===1?'pedido sin repartidor':'pedidos sin repartidor'}. Tenés hasta ${configRed.plazo_asignar_min} minutos desde que entraron para asignarlos.`;
 }
 
@@ -3517,7 +3555,7 @@ function pintarEmpresasDelCliente(){
     ? `<span style="color:#8a6100">⚖️ Con ${mias.length} empresas, el reparto lo decide el cliente con sus reglas. Lo que no calza con ninguna queda <b>compartido</b> hasta que alguien lo cargue.</span>`
     : mias.length===1
       ? '<span style="color:#006300">Los pedidos le llegan directo a esa empresa.</span>'
-      : '<span style="color:#d03b3b">⚠️ Sin ninguna marcada, sus pedidos quedan en el pool sin que nadie pueda verlos.</span>';
+      : '<span style="color:#d03b3b">⚠️ Sin ninguna marcada, ninguna empresa de reparto ve sus pedidos.</span>';
 }
 /* lo que el CLIENTE decidió: acá se mira, no se toca */
 function pintarReglasDelCliente(){

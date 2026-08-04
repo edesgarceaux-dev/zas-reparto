@@ -88,20 +88,20 @@ const r = await page.evaluate(async () => {
   eval(`sb.from = (t) => ({ select: () => ({ eq: () => ({ order: () => Promise.resolve({data:[]}) }) }) })`);
   await window.verDetalle(99);
   const det = document.getElementById('mDetBody').innerHTML;
-  ok('8. el pedido propio ofrece "Devolver al pool"', det.includes('Devolver al pool'));
+  ok('8. el pedido propio ofrece soltarlo', det.includes('Soltar el pedido'));
   ok('8b. muestra de qué empresa es', det.includes('Envíos ZAS'), '');
 
   eval("pedidos[0].estado = 'en_camino'; soySuper = false;");
   await window.verDetalle(99);
   const det2 = document.getElementById('mDetBody').innerHTML;
   ok('9. una empresa NO puede devolver algo que va en camino',
-      !det2.includes('Devolver al pool') && det2.includes('no se puede devolver'));
+      !det2.includes('Soltar el pedido') && det2.includes('no se puede soltar'));
 
   eval("soySuper = true");
   await window.verDetalle(99);
   const det3 = document.getElementById('mDetBody').innerHTML;
   ok('9b. el super-admin sí puede forzarlo aunque vaya en camino',
-      det3.includes('Devolver al pool (forzar)') && det3.includes('solo tú puedes forzar'));
+      det3.includes('Soltar el pedido (forzar)') && det3.includes('solo tú puedes forzar'));
   eval("pedidos[0].estado = 'pendiente'");
 
   eval("sb.rpc = async (n,a) => { window.__ult={n,a}; return { data:{devueltos:1, ids:a.p_ids, no_pudo:[]}, error:null }; }");

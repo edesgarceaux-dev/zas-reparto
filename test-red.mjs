@@ -116,7 +116,7 @@ const r = await page.evaluate(async () => {
     poolPedidos = ${JSON.stringify([
       mkPool(1,'Providencia','ninguna empresa cubre Providencia o todas llegaron a su cuota del día'),
       mkPool(2,'Maipú','2 empresas calzan parejo: lo decide el pool'),
-      mkPool(3,'Ñuñoa','volvió al pool: venció el plazo para asignar repartidor'),
+      mkPool(3,'Ñuñoa','volvió a quedar compartido: venció el plazo para asignar repartidor'),
     ])};
     pedidos = [];
     poolSel = new Set();
@@ -197,7 +197,7 @@ const r = await page.evaluate(async () => {
 
   eval(`pedidos[0].vence_asignacion_en = '${enMin(-5)}';`);
   window.pintarReloj();
-  ok('3b. avisa cuando alguno ya volvió al pool', /volvió al pool/.test($('avisoReloj').textContent), $('avisoReloj').textContent);
+  ok('3b. avisa cuando alguno ya volvió a quedar compartido', /volvió a quedar compartido/.test($('avisoReloj').textContent), $('avisoReloj').textContent);
 
   eval(`pedidos = [{id:203,cliente_id:1,estado:'asignado',repartidor_id:'r1',codigo:'C',cliente_nombre:'x',direccion:'y',fecha_pedido:'2026-08-03',creado_en:'2026-08-03T09:00:00Z'}];`);
   window.pintarReloj();
