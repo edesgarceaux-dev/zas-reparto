@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ZAS Reparto — Panel de Control</title>
-<!-- panel v1.34 -->
+<!-- panel v1.35 -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -141,7 +141,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       <button data-t="resumen" class="on">Resumen</button>
       <button data-t="pedidos">Pedidos</button>
       <button data-t="pool" id="navPool" style="display:none">📥 Pool<span id="poolN" style="display:none;margin-left:5px;background:#0CA30C;color:#fff;border-radius:99px;font-size:10px;min-width:16px;height:16px;line-height:16px;text-align:center;padding:0 4px;font-weight:700;vertical-align:middle">0</span></button>
-      <button data-t="clientes">Clientes</button>
+      <button data-t="clientes">Clientes<span id="cliN" style="display:none;margin-left:5px;background:#d03b3b;color:#fff;border-radius:99px;font-size:10px;min-width:16px;height:16px;line-height:16px;text-align:center;padding:0 4px;font-weight:700;vertical-align:middle">0</span></button>
       <button data-t="repartidores">Repartidores</button>
       <button data-t="empresas" id="navEmpresas" style="display:none" title="Empresas de reparto que usan este sistema">🚚 Empresas</button>
       <button id="navMaestro" style="display:none" title="Panel maestro de la red" onclick="location.href='panel-maestro.html'">🛰️ Maestro</button>
@@ -710,7 +710,7 @@ const EST = {
 };
 const FIN = ['entregado','cancelado','no_entregado'];
 let pedidos = [], perfiles = [], clientes = [], filtro = 'activos', busq = '', clienteEditando = null;
-/* ---- POOL / RED DE EMPRESAS DE REPARTO (v1.34) ---- */
+/* ---- POOL / RED DE EMPRESAS DE REPARTO (v1.35) ---- */
 let empresas = [], habilitaciones = [], poolPedidos = [];
 let miEmpresa = null, soySuper = false, HAY_POOL = false;
 /* v1.33: reglas de reparto del cliente y frenos anti-acaparamiento */
@@ -2929,13 +2929,22 @@ function pintarReglasPool(){
 /* solicitudes de vínculo esperando respuesta */
 function pintarVinculosPendientes(){
   const caja = $('avisoVinculos');
-  if(!caja) return;
   const mias = habilitaciones.filter(v=>v.estado==='pendiente' && v.empresa_reparto_id===miEmpresa);
   const meToca = mias.filter(v=>v.solicitado_por==='cliente');
   const esperando = mias.filter(v=>v.solicitado_por==='empresa');
+
+  // globito rojo en el menú: las invitaciones que esperan que YO responda
+  const badge = $('cliN');
+  if(badge){
+    badge.style.display = meToca.length ? 'inline-block' : 'none';
+    badge.textContent = meToca.length;
+  }
+  if(!caja) return;
   if(!mias.length){ caja.style.display='none'; return; }
   caja.style.display='block';
-  const nom = id => clienteDe(id) || ('cliente #'+id);
+  // ojo: mientras el vínculo está pendiente todavía NO veo la ficha de ese
+  // cliente, así que su nombre puede no estar cargado
+  const nom = id => clienteDe(id) || ('cliente #'+id+' (todavía no podés ver su ficha)');
   caja.innerHTML =
     (meToca.length ? `<b>📨 Te invitaron a repartir:</b><div style="margin-top:6px;display:flex;flex-direction:column;gap:6px">` +
       meToca.map(v=>`<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">

@@ -105,6 +105,10 @@ const r = await page.evaluate(async () => {
   ok('4. muestra la invitación que le toca responder', /Te invitaron a repartir/.test(av.textContent) && /Me invitó/.test(av.textContent), av.textContent.slice(0,140));
   ok('4b. y la que está esperando respuesta del cliente', /Esperando que acepte/.test(av.textContent) && /Le pedí yo/.test(av.textContent), av.textContent.slice(0,200));
 
+  ok('4d. el globito del menú Clientes marca la que espera respuesta',
+      $('cliN').style.display==='inline-block' && $('cliN').textContent==='1',
+      'display='+$('cliN').style.display+' n='+$('cliN').textContent);
+
   window.cargarTodo = async ()=>{};
   await window.responderVinculo(5, true);
   ok('4c. aceptar llama a responder_vinculo con mi empresa',

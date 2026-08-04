@@ -284,7 +284,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
 const SUPABASE_URL = 'https://racwaageoajxaxzqtjio.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJhY3dhYWdlb2FqeGF4enF0amlvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU1MzU3NjUsImV4cCI6MjEwMTExMTc2NX0.9SijMMVHYM2c6oYUc6mA62XpWw4Y2zf8d9HhalPSJWA';
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const VERSION = 'maestro v1.0';
+const VERSION = 'maestro v1.1';
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s??'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -436,12 +436,24 @@ $('epCuentaCrear').onclick = async ()=>{
     if(error) throw new Error(error.message);
     const uid = data.user?.id;
     if(!uid) throw new Error('No se pudo obtener la cuenta creada');
-    await new Promise(r=>setTimeout(r, 900));
-    const { error:e2 } = await sb.from('perfiles')
-      .update({ rol:'admin', empresa_reparto_id:empresaEditando, superadmin:false, nombre:nom, correo:e })
-      .eq('id', uid);
-    if(e2) throw new Error(e2.message);
-    est.innerHTML = '<span style="color:#006300"><b>✅ Acceso creado.</b> Que entre con ese correo en el panel de empresa.</span>';
+    // el perfil lo crea un trigger y puede tardar: reintentamos hasta
+    // comprobar que quedó DENTRO de la empresa. Sin esto, el update puede
+    // no tocar ninguna fila y la cuenta queda huérfana sin avisar.
+    let listo = false, ultimo = '';
+    for(let i = 0; i < 8 && !listo; i++){
+      await new Promise(r=>setTimeout(r, 600));
+      const { error:e2 } = await sb.from('perfiles')
+        .update({ rol:'admin', empresa_reparto_id:empresaEditando, superadmin:false, nombre:nom, correo:e })
+        .eq('id', uid);
+      if(e2) ultimo = e2.message;
+      const { data:chk } = await sb.from('perfiles')
+        .select('empresa_reparto_id,rol').eq('id', uid).maybeSingle();
+      listo = !!chk && chk.rol === 'admin' && Number(chk.empresa_reparto_id) === Number(empresaEditando);
+      est.textContent = 'Creando cuenta… (' + (i+1) + ')';
+    }
+    if(!listo) throw new Error('Se creó el usuario pero no quedó dentro de la empresa'
+      + (ultimo ? ' (' + ultimo + ')' : '') + '. Cerrá y volvé a abrir la empresa: si el acceso no aparece en la lista, avisame.');
+    est.innerHTML = '<span style="color:#006300"><b>✅ Acceso creado y dentro de la empresa.</b> Que entre con ese correo en el panel de empresa.</span>';
     $('epCuentaEmail').value=''; $('epCuentaPass').value='';
     await cargarTodo(); pintarCuentas();
   }catch(err){ est.innerHTML = `<span style="color:#d03b3b">${esc(err.message)}</span>`; }
