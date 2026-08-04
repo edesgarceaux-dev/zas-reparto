@@ -39,6 +39,27 @@ const r = await page.evaluate(async () => {
   `);
   window.__sel = () => [];
 
+  // ---------- 0. una empresa RECIÉN CREADA, sin un solo pedido ----------
+  // Bug de v1.35: el panel decidía si la migración estaba corrida mirando
+  // si algún pedido traía la columna nueva. Sin pedidos, decía que no y le
+  // escondía el Pool, el botón de sumar clientes y las invitaciones.
+  window.__sel = (t) => t === 'empresas_reparto' ? [{id:9,nombre:'Rapiditos 360',activo:true}]
+                      : t === 'config_red'       ? [{plazo_asignar_min:120,tope_sin_asignar:30}]
+                      : t === 'cliente_empresas' ? [{cliente_id:1,empresa_reparto_id:9,estado:'pendiente',activo:true,solicitado_por:'cliente'}]
+                      : [];
+  eval("soySuper = false; miEmpresa = 9;");
+  await window.cargarTodo();
+  ok('0. empresa nueva sin pedidos: igual reconoce que la migración está corrida',
+      eval("HAY_POOL") === true, 'HAY_POOL=' + eval("HAY_POOL"));
+  ok('0b. le muestra la pestaña Pool', $('navPool').style.display !== 'none');
+  ok('0c. le muestra el botón de sumar clientes de la red', $('btnSumarRed').style.display !== 'none');
+  ok('0d. y ve la invitación que le mandaron', /Te invitaron a repartir/.test($('avisoVinculos').textContent),
+      $('avisoVinculos').textContent.slice(0,80));
+  ok('0e. la tabla vacía le explica los tres caminos',
+      /Sumar cliente de la red/.test($('tbodyCli') ? $('tbodyCli').innerHTML : document.querySelector('#t-clientes tbody').innerHTML),
+      '');
+  window.__sel = () => [];
+
   // =====================================================================
   //  PANEL DE LA EMPRESA DE REPARTO
   // =====================================================================

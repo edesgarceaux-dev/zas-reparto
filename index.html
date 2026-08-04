@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ZAS Reparto — Panel de Control</title>
-<!-- panel v1.35 -->
+<!-- panel v1.36 -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -710,7 +710,7 @@ const EST = {
 };
 const FIN = ['entregado','cancelado','no_entregado'];
 let pedidos = [], perfiles = [], clientes = [], filtro = 'activos', busq = '', clienteEditando = null;
-/* ---- POOL / RED DE EMPRESAS DE REPARTO (v1.35) ---- */
+/* ---- POOL / RED DE EMPRESAS DE REPARTO (v1.36) ---- */
 let empresas = [], habilitaciones = [], poolPedidos = [];
 let miEmpresa = null, soySuper = false, HAY_POOL = false;
 /* v1.33: reglas de reparto del cliente y frenos anti-acaparamiento */
@@ -2047,19 +2047,26 @@ async function cargarTodo(){
   // si hay pedidos tomados y sin repartidor a los que se les pasó la hora,
   // vuelven solos al pool antes de que miremos nada
   try { await sb.rpc('liberar_vencidos'); } catch(_){}
-  const [p1,p2,p3,p4,p5,p6] = await Promise.all([
+  const [p1,p2,p3,p4,p5,p6,p7] = await Promise.all([
     sb.from('perfiles').select().order('nombre'),
     sb.from('pedidos').select().order('creado_en',{ascending:false}).limit(1000),
     sb.from('clientes').select().order('nombre'),
     sb.from('empresas_reparto').select().order('nombre'),
     sb.from('cliente_empresas').select(),
     sb.from('config_red').select().maybeSingle(),
+    // sonda: preguntamos por la columna nueva a propósito. Si la migración
+    // no está corrida, esto da error. Si está, no da error AUNQUE no haya
+    // ningún pedido — que es el caso de una empresa recién creada.
+    sb.from('pedidos').select('id,empresa_reparto_id').limit(1),
   ]);
   perfiles = p1.data||[]; clientes = p3.data||[];
   empresas = p4.data||[]; habilitaciones = p5.data||[];
   if(p6 && p6.data) configRed = p6.data;
-  // ¿ya está corrida la migración del pool? (si no, todo sigue como antes)
-  HAY_POOL = !p4.error && (p2.data||[]).some(p=>'empresa_reparto_id' in p);
+  // ¿ya está corrida la migración de la red?
+  // 🐛 v1.36: antes se miraba si algún pedido traía la columna. Una empresa
+  // nueva no tiene ni un pedido, así que daba "no está corrida" y le
+  // escondía el Pool, el botón de sumar clientes y las invitaciones.
+  HAY_POOL = !p4.error && !p7.error;
   repartirPedidos(p2.data||[]);
   $('navPool').style.display     = HAY_POOL ? '' : 'none';
   $('navEmpresas').style.display = (HAY_POOL && soySuper) ? '' : 'none';
@@ -2243,7 +2250,12 @@ function pintarClientes(){
       <td>${deHoy}</td>
       <td><button class="btn btn-ghost" onclick="editarCliente(${c.id})">Editar</button></td>
     </tr>`;
-  }).join('') : '<tr><td colspan="6" class="empty">Aún no hay clientes. Crea el primero.</td></tr>';
+  }).join('') : (HAY_POOL
+      ? '<tr><td colspan="6" class="empty">Todavía no tenés clientes.<br><br>' +
+        'Si es un cliente nuevo, usá <b>+ Nuevo cliente</b>.<br>' +
+        'Si ya trabaja con otra empresa de la red, usá <b>🔗 Sumar cliente de la red</b> y buscalo por su RUT.<br>' +
+        'Y si un cliente te invitó, la invitación te aparece acá arriba.</td></tr>'
+      : '<tr><td colspan="6" class="empty">Aún no hay clientes. Crea el primero.</td></tr>');
 }
 
 let mapaCli = null, marcadorCli = null, cLat = null, cLng = null;
