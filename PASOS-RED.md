@@ -1,6 +1,6 @@
 # TODO LO QUE HAY QUE HACER — en orden
 
-Panel v1.40 · Maestro v1.2 · APK v2.6.0
+Panel v1.41 · Maestro v1.2 · APK v2.7.0
 Hacelo de arriba abajo, sin saltear. Toma unos 20 minutos.
 
 ---
@@ -17,10 +17,12 @@ Uno por uno. Todos son seguros de repetir. Están en la carpeta `supabase/`.
 | 3 | `migracion-zona-cobertura.sql` | carga las 52 comunas de la RM |
 | 4 | `migracion-escaneo-reclama.sql` | el escaneo reclama el pedido |
 | 5 | `migracion-plan-y-carga.sql` | planificar en paralelo + «Mi carga» + avisos |
+| 6 | `migracion-asignar-por-qr.sql` | asignar repartidor escaneando, desde la app |
 
 **Qué mirar en cada una** (te devuelven una tabla al final):
 - En la **3**: `comunas_que_reparte` tiene que dar **52**. Abajo te lista las comunas que quedaron fuera de zona — si ves una de la RM mal escrita, la agregás después desde el maestro.
 - En la **5**: `clientes_por_reglas` + `clientes_modo_abierto` tiene que ser el total de tus clientes.
+- En la **6**: `permiso_creado` = 1 y `funciones_creadas` = 3. `cuentas_que_pueden_asignar` son tus admin, que lo reciben prendido.
 
 **No corras** `migracion-pool-empresas.sql`: está anulada, el archivo es solo un cartel.
 
@@ -28,12 +30,20 @@ Uno por uno. Todos son seguros de repetir. Están en la carpeta `supabase/`.
 
 ## 2. Subir los paneles y hacer push
 
-Los archivos ya están en tu carpeta. Recordá que el sitio publica el **`index.html` de la raíz**, no `panel/`.
+⚠️ **El sitio publica el `index.html` de la RAÍZ, no la carpeta `panel/`.**
+Por eso te mando los tres archivos ya renombrados y listos para dejar caer en
+la raíz de `zas-reparto\` (pisando lo que haya):
+
+| Archivo que te mandé | Dónde va |
+|---|---|
+| `index.html` | raíz — **es el panel v1.40 ya renombrado** |
+| `panel-maestro.html` | raíz |
+| `seguimiento.html` | raíz |
 
 ```
-git add index.html panel-maestro.html panel/ supabase/ test-*.mjs PASOS-RED.md
-git add ZAS-Reparto-v2.6.0-moderno.apk ZAS-Reparto-v2.6.0-antiguo.apk
-git commit -m "v1.40 pedidos compartidos + mi carga + escaneo reclama"
+git add index.html panel-maestro.html seguimiento.html panel/ supabase/ test-*.mjs PASOS-RED.md
+git add ZAS-Reparto-v2.7.0-moderno.apk ZAS-Reparto-v2.7.0-antiguo.apk
+git commit -m "v1.41 asignar por QR desde la app"
 git push
 ```
 
@@ -43,7 +53,8 @@ Esperá ~1 minuto a que GitHub Pages reconstruya y entrá con **Ctrl+F5**.
 
 ## 3. Instalar la APK
 
-**`ZAS-Reparto-v2.6.0-moderno.apk`** en los teléfonos de los repartidores.
+**`ZAS-Reparto-v2.7.0-moderno.apk`** en los teléfonos de los repartidores
+**y en el del que reparte la pega en bodega**.
 (La `-antiguo` es solo para teléfonos viejos de 32 bits.)
 
 Sin esta versión el escaneo no reclama nada, así que los pedidos compartidos se quedan sin dueño.
@@ -53,6 +64,10 @@ Sin esta versión el escaneo no reclama nada, así que los pedidos compartidos s
 ## 4. Configurar (5 minutos, una sola vez)
 
 **En el panel maestro → Reglas de la red**: revisá abajo la caja **Zona de cobertura**. Tienen que estar las 52 comunas. Si repartís a alguna más, agregala ahí.
+
+**En Repartidores → Editar**, a quien reparte la pega en bodega prendele la casilla
+**«📲 Puede asignar pedidos desde la app»**. Tus admin ya lo tienen prendido. En la lista
+queda marcado con **📲 asigna**.
 
 **En el portal de cada cliente → Mis empresas de reparto**: elegí cómo quiere repartir.
 - **Por mis reglas**: le da comunas a cada empresa. Lo que no calza con nadie queda compartido.
@@ -68,6 +83,11 @@ Sin esta versión el escaneo no reclama nada, así que los pedidos compartidos s
 4. Que un repartidor escanee esa etiqueta con la app. El pedido pasa a su empresa, se va a **📦 Mi carga**, y desaparece de la otra.
 5. En el panel de la empresa que lo perdió aparece la franja **📣 «salió de tu ruta»** diciendo quién se lo llevó.
 
+**Y el atajo de bodega**: entrá a la app con la cuenta habilitada, tocá **Asignar**
+arriba a la derecha, elegí un repartidor y pasá tres bultos por la cámara. Los tres
+quedan a nombre suyo, el contador del chip sube, y **Deshacer último** revierte el
+que pasó por error.
+
 ---
 
 ## Cómo funciona ahora, en tres líneas
@@ -75,6 +95,7 @@ Sin esta versión el escaneo no reclama nada, así que los pedidos compartidos s
 - Un pedido fuera de la RM o sin comuna **no lo ve ninguna empresa**: solo el cliente.
 - Un pedido que las reglas del cliente le asignaron a una empresa **es de esa empresa**, nadie más lo ve ni lo puede escanear.
 - Todo lo demás queda **compartido**: todas lo ven, todas pueden planificarlo, y **se lo queda la empresa cuyo repartidor lo escanee**.
+- Da igual quién escanee: el repartidor con su ruta, o el de bodega asignando. El bulto es de quien lo pasa por la cámara primero.
 
 ---
 

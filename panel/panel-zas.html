@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ZAS Reparto — Panel de Control</title>
-<!-- panel v1.40 -->
+<!-- panel v1.41 -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -664,6 +664,17 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
   <p style="color:var(--muted);font-size:11.5px;margin-top:4px">
     ⭐ "🤖 Repartir auto" le dará primero los pedidos de estas comunas, en ese orden de prioridad.
   </p>
+  <div style="margin-top:14px;padding:12px;background:#FAF7F2;border:1px solid #EADFCE;border-radius:10px">
+    <label style="display:flex;align-items:center;gap:9px;margin:0;cursor:pointer">
+      <input type="checkbox" id="ePuedeAsignar" style="width:17px;height:17px;margin:0">
+      <b style="font-size:13.5px">📲 Puede asignar pedidos desde la app</b>
+    </label>
+    <p style="color:var(--muted);font-size:11.5px;margin:6px 0 0 26px">
+      En bodega abre la app, elige un repartidor y va pasando los bultos por la cámara:
+      cada escaneo deja el pedido a nombre de esa persona. Dáselo a quien reparte la pega,
+      no a todos.
+    </p>
+  </div>
   <p style="color:var(--muted);font-size:11.5px;margin-top:8px">
     ℹ️ El correo con el que <b>inicia sesión</b> no se cambia desde aquí (es el de la cuenta);
     este correo es solo de contacto.
@@ -2271,7 +2282,7 @@ function pintarReps(){
     (a.rol===b.rol ? a.nombre.localeCompare(b.nombre) : a.rol==='repartidor' ? -1 : 1));
   $('tbodyReps').innerHTML = reps.length? reps.map(r=>`
     <tr style="cursor:default">
-      <td><b>${esc(r.nombre)}</b>${r.rol==='admin'?' <span class="st" style="color:#2a78d6;font-size:11px">👑 admin</span>':''}</td>
+      <td><b>${esc(r.nombre)}</b>${r.rol==='admin'?' <span class="st" style="color:#2a78d6;font-size:11px">👑 admin</span>':''}${r.puede_asignar?' <span class="st" style="color:#8a5a00;font-size:11px" title="Puede asignar pedidos escaneando desde la app">📲 asigna</span>':''}</td>
       <td>${esc(r.telefono||'—')}</td>
       <td>${esc(r.direccion||'—')}${r.comuna_preferida?`<br><span class="cod">⭐ prefiere ${esc(r.comuna_preferida)}</span>`:''}</td>
       <td>${esc(r.correo||'—')}</td>
@@ -2827,6 +2838,7 @@ window.editarRep = (id)=>{
   $('eNombre').value = r.nombre||''; $('eTel').value = r.telefono||'';
   $('eDir').value = r.direccion||''; $('eCorreo').value = r.correo||'';
   $('eComuna').value = r.comuna_preferida||'';
+  $('ePuedeAsignar').checked = r.puede_asignar === true;
   $('eErr').textContent='';
   $('mEditRep').classList.add('on'); $('eNombre').focus();
 };
@@ -2836,8 +2848,19 @@ $('eGuardar').onclick = async ()=>{
     nombre:$('eNombre').value.trim(), telefono:$('eTel').value.trim()||null,
     direccion:$('eDir').value.trim()||null, correo:$('eCorreo').value.trim()||null,
     comuna_preferida:$('eComuna').value.trim()||null,
+    puede_asignar:$('ePuedeAsignar').checked,
   };
   let { error } = await sb.from('perfiles').update(datos).eq('id', repEditando);
+  if(error && /puede_asignar/i.test(error.message)){
+    // falta migracion-asignar-por-qr.sql: guardar todo lo demás igual
+    const { puede_asignar, ...resto } = datos;
+    ({ error } = await sb.from('perfiles').update(resto).eq('id', repEditando));
+    if(!error){
+      cerrar('mEditRep');
+      toast('⚠️ Guardado — para el permiso de asignar por QR corré migracion-asignar-por-qr.sql');
+      cargarTodo(); return;
+    }
+  }
   if(error && /column/i.test(error.message)){
     // falta la migración de perfiles: guardar al menos nombre y teléfono
     ({ error } = await sb.from('perfiles')
