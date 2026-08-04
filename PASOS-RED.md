@@ -78,6 +78,29 @@ Sin esta versión el escaneo no reclama nada, así que los pedidos compartidos s
 
 ---
 
+## 6. MercadoLibre en piloto automático
+
+**El problema ya casi no existe**: `ml-notif` guarda el n° de envío al entrar la
+venta, y funciona — 237 de 238 ventas en tres días entraron completas. El botón
+«🔄 Sincronizar envíos ML» solo hace falta para el rezagado ocasional, cuando
+MercadoLibre no manda la notificación o la manda antes de que el envío exista.
+
+Para cerrar ese último hueco y no apretar más ese botón:
+
+1. Buscá el valor de **WEBHOOK_TOKEN** en Supabase → Project Settings → Edge
+   Functions → Secrets.
+2. Abrí `supabase/migracion-ml-automatico.sql`, pegalo en el SQL Editor y
+   **cambiá la única línea marcada** con ese token.
+3. Run. Queda programado que Supabase llame sola a `ml-backfill` cada 15
+   minutos y complete lo que falte. Si no falta nada, no hace nada.
+
+Para comprobar cómo viene: `supabase/revisar-ml.sql` (no cambia nada, la
+consulta que importa es la última).
+
+Para apagarlo alguna vez: `select cron.unschedule('zas-ml-envios');`
+
+---
+
 ## Lo que sigue pendiente (no urgente)
 
 - Separar el panel en tres páginas: empresa, cliente y maestro. Hoy el archivo grande tiene el panel de empresa y el portal del cliente juntos.
