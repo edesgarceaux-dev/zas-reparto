@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ZAS Reparto — Panel de Control</title>
-<!-- panel v1.44 -->
+<!-- panel v1.45 -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -1947,7 +1947,7 @@ $('autoGo').onclick = async ()=>{
       escritosTotal += r.n;
       if(r.rechazados?.length) rechazos.push(...r.rechazados);
       // el orden de los que YA son míos va en la tabla de pedidos
-      await guardarOrdenDeRuta(ordenados.filter(p=>!esCompartido(p)));
+      await guardarOrdenDeRuta(paresDeOrden(ordenados));
       resumen.push(`${nombreDe(elegidos[g])} (${r.n}${r.previstos ? ` · ${r.previstos} previstos` : ''})`);
     }
     cerrar('mAuto'); limpiarSeleccion();
@@ -1980,16 +1980,23 @@ function motivosCortos(rechazos){
    en fila: con 250 bultos eran 250 viajes al servidor, tardaba minutos y si
    alguno fallaba nadie se enteraba. Ahora van de a 40 en paralelo y, si algo
    falla, se avisa. */
-async function guardarOrdenDeRuta(ordenados){
+async function guardarOrdenDeRuta(pares){
   const TANDA = 40;
-  for(let i=0; i<ordenados.length; i+=TANDA){
-    const tanda = ordenados.slice(i, i+TANDA);
-    const res = await Promise.all(tanda.map((p,k)=>
-      sb.from('pedidos').update({ruta_orden: i+k+1}).eq('id', p.id)));
+  for(let i=0; i<pares.length; i+=TANDA){
+    const tanda = pares.slice(i, i+TANDA);
+    const res = await Promise.all(tanda.map(x=>
+      sb.from('pedidos').update({ruta_orden: x.orden}).eq('id', x.id)));
     const err = res.find(x=>x && x.error);
     if(err) throw new Error('No se pudo guardar el orden de la ruta: '+err.error.message);
   }
 }
+
+/* De una ruta ya ordenada saca los pares {id, orden} de los pedidos que SÍ
+   son de la empresa, conservando su posición real dentro de la ruta. */
+const paresDeOrden = ruta => ruta
+  .map((p, i) => ({ id: p.id ?? p, orden: i+1, p: pedidoPorId(p.id ?? p) }))
+  .filter(x => !esCompartido(x.p))
+  .map(({id, orden}) => ({id, orden}));
 
 /* Agrupación por sectores COMPACTOS con cupos y comuna de preferencia:
    1. Primero los repartidores CON comuna de preferencia: su semilla es un
@@ -3894,10 +3901,22 @@ async function elegirPartida(){
   }
 }
 
+/* 🐛 v1.45 — EL MAPA TAMBIÉN TIENE QUE MIRAR LOS PLANES.
+   Un pedido compartido no guarda su repartidor en `repartidor_id` sino en
+   plan_reparto (por eso dice «previsto»). El mapa filtraba solo por
+   `repartidor_id`, así que un repartidor con 900 pedidos previstos aparecía
+   con «0 activos» y su ruta salía vacía: no había forma de armarla.
+   `repartidorEfectivo` y `ordenEfectivo` miran los dos lados. */
+const ordenEfectivo = p => {
+  if(esCompartido(p)){ const pl = planDe(p.id); return pl?.orden ?? null; }
+  return p.ruta_orden ?? null;
+};
+
 function poblarSelectorRuta(){
   const sel = $('rutaRep'); const valor = sel.value;
-  const conteo = id => pedidos.filter(p=>p.repartidor_id===id && !FIN.includes(p.estado)).length;
-  sel.innerHTML = `<option value="">📦 Sin asignar (${pedidos.filter(p=>p.estado==='pendiente').length})</option>` +
+  const conteo = id => pedidos.filter(p=>repartidorEfectivo(p)===id && !FIN.includes(p.estado)).length;
+  const sinNadie = pedidos.filter(p=>p.estado==='pendiente' && !repartidorEfectivo(p)).length;
+  sel.innerHTML = `<option value="">📦 Sin asignar (${sinNadie})</option>` +
     perfiles.filter(x=>x.activo && x.rol!=='empresa').map(r=>
       `<option value="${r.id}">🛵 ${esc(r.nombre)}${r.rol==='admin'?' (admin)':''} — ${conteo(r.id)} activos</option>`).join('');
   if(valor) sel.value = valor;
@@ -3906,10 +3925,11 @@ function poblarSelectorRuta(){
 const fechaLocalDe = ts => ts ? new Date(ts).toLocaleDateString('en-CA') : null;
 function pedidosDeRuta(){
   const rep = $('rutaRep').value;
-  if(!rep) return pedidos.filter(p=>p.estado==='pendiente' && p.fecha_pedido >= hoyDia());
+  if(!rep) return pedidos.filter(p=>p.estado==='pendiente' && !repartidorEfectivo(p)
+                                 && p.fecha_pedido >= hoyDia());
   const hoy = hoyDia();
   // activos + terminados HOY (por fecha real de término, no del pedido): se quedan en el mapa con su color
-  return pedidos.filter(p=>p.repartidor_id===rep &&
+  return pedidos.filter(p=>repartidorEfectivo(p)===rep &&
     (!FIN.includes(p.estado) ||
       (['entregado','no_entregado'].includes(p.estado) &&
         (fechaLocalDe(p.entregado_en)===hoy || fechaLocalDe(p.actualizado_en)===hoy || p.fecha_pedido===hoy))));
@@ -3920,7 +3940,7 @@ function ordenarParaRuta(lista){
     const pos = Object.fromEntries(ordenPropuesto.map((id,i)=>[id,i]));
     return [...lista].sort((a,b)=>(pos[a.id]??999)-(pos[b.id]??999));
   }
-  return [...lista].sort((a,b)=>(a.ruta_orden??999)-(b.ruta_orden??999) || a.id-b.id);
+  return [...lista].sort((a,b)=>(ordenEfectivo(a)??999)-(ordenEfectivo(b)??999) || a.id-b.id);
 }
 
 function dibujarRuta(){
@@ -4313,13 +4333,29 @@ function optimizarLocal(activos, sinUbicar){
 
 window.guardarOrden = async ()=>{
   if(!ordenPropuesto) return;
-  for(let i=0;i<ordenPropuesto.length;i++){
-    await sb.from('pedidos').update({ruta_orden:i+1}).eq('id', ordenPropuesto[i]);
-  }
-  toast('Orden de ruta guardado — el repartidor la verá en ese orden');
-  ordenPropuesto = null;
-  $('btnGuardarOrden').style.display = 'none';
-  cargarTodo();
+  const rep = $('rutaRep').value || null;
+  /* 🐛 v1.45 — cada pedido guarda su orden donde le corresponde: los que ya
+     son de la empresa en `pedidos.ruta_orden`, y los compartidos en el plan
+     (no son nuestros todavía, esa escritura no entraría). Antes iban todos a
+     `pedidos`, de a uno, y en los compartidos se perdía en silencio. */
+  const compartidos = ordenPropuesto.filter(id => esCompartido(pedidoPorId(id)));
+  $('btnGuardarOrden').disabled = true;
+  try{
+    const pares = paresDeOrden(ordenPropuesto);
+    if(pares.length) await guardarOrdenDeRuta(pares);
+    if(compartidos.length){
+      if(!rep){ toast('Elegí un repartidor arriba para guardarle la ruta'); return; }
+      const { error } = await sb.rpc('planificar_pedidos',
+        { p_ids: compartidos, p_repartidor: rep });
+      if(error) throw new Error(/planificar_pedidos/.test(error.message)
+        ? 'Falta correr migracion-plan-y-carga.sql en Supabase.' : error.message);
+    }
+    toast(`Orden de ruta guardado (${ordenPropuesto.length} paradas) — el repartidor la verá en ese orden`);
+    ordenPropuesto = null;
+    $('btnGuardarOrden').style.display = 'none';
+    cargarTodo();
+  }catch(e){ toast('Error al guardar el orden: '+e.message); }
+  finally{ $('btnGuardarOrden').disabled = false; }
 };
 $('rutaRep').addEventListener('change', ()=>{
   ordenPropuesto=null; $('btnGuardarOrden').style.display='none';

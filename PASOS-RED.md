@@ -1,6 +1,6 @@
 # TODO LO QUE HAY QUE HACER — en orden
 
-Panel v1.44 · Maestro v1.2 · APK v2.8.1
+Panel v1.45 · Maestro v1.2 · APK v2.8.1
 Hacelo de arriba abajo, sin saltear. Toma unos 20 minutos.
 
 ---
@@ -38,14 +38,14 @@ la raíz de `zas-reparto\` (pisando lo que haya):
 
 | Archivo que te mandé | Dónde va |
 |---|---|
-| `index.html` | raíz — **es el panel v1.44 ya renombrado** |
+| `index.html` | raíz — **es el panel v1.45 ya renombrado** |
 | `panel-maestro.html` | raíz |
 | `seguimiento.html` | raíz |
 
 ```
 git add index.html panel-maestro.html seguimiento.html panel/ supabase/ test-*.mjs PASOS-RED.md
 git add ZAS-Reparto-v2.8.1-moderno.apk ZAS-Reparto-v2.8.1-antiguo.apk
-git commit -m "v1.44 Mi carga accionable + arreglos del reparto automático"
+git commit -m "v1.45 el mapa ve los pedidos previstos"
 git push
 ```
 
@@ -168,6 +168,20 @@ cargados viven en otra lista. Ahora:
   repartidor desde la app; esto es para corregir a mano desde la oficina.
 - La tabla tiene **casillas** y una barra de acciones: reasignar a otro repartidor,
   quitar la asignación, cambiar el estado de varios de una, o cancelarlos.
+
+### El mapa y los pedidos compartidos (v1.45)
+
+Le asignabas 900 pedidos a un repartidor y en **Mapa** aparecía con **«0 activos»**,
+sin un solo punto: no había forma de armarle la ruta. Misma causa que lo anterior —
+el mapa buscaba por `repartidor_id`, y un pedido compartido guarda su repartidor en
+el plan, no en el pedido. Ahora el mapa mira los dos lados:
+
+- El desplegable cuenta bien: **«Hans Stuardo — 929 activos»**.
+- **«Sin asignar»** ya no cuenta los que tienen repartidor previsto.
+- Los puntos se dibujan y la ruta se ordena con el orden del plan.
+- **Guardar orden** manda cada pedido a donde corresponde: los tuyos a
+  `pedidos.ruta_orden`, los compartidos al plan. En una ruta mezclada cada uno
+  conserva su posición real.
 
 ---
 
