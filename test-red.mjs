@@ -58,6 +58,36 @@ const r = await page.evaluate(async () => {
   ok('0e. la tabla vacía le explica los tres caminos',
       /Sumar cliente de la red/.test($('tbodyCli') ? $('tbodyCli').innerHTML : document.querySelector('#t-clientes tbody').innerHTML),
       '');
+  // ---------- 0f. el dueño entra al panel de UNA empresa ----------
+  // La base le deja ver todo, pero el panel de empresa tiene que mostrarle
+  // solo lo de esa empresa: si no, le aparecen los repartidores y los
+  // pedidos de las otras.
+  window.__sel = (t) =>
+      t === 'empresas_reparto' ? [{id:1,nombre:'Envíos ZAS',activo:true},{id:9,nombre:'Rapiditos 360',activo:true}]
+    : t === 'config_red'       ? [{plazo_asignar_min:120,tope_sin_asignar:30}]
+    : t === 'cliente_empresas' ? [{cliente_id:1,empresa_reparto_id:1,estado:'activa',activo:true,comunas:[]},
+                                  {cliente_id:2,empresa_reparto_id:9,estado:'activa',activo:true,comunas:[]}]
+    : t === 'clientes'         ? [{id:1,nombre:'Mi Cliente'},{id:2,nombre:'Cliente de la otra'}]
+    : t === 'perfiles'         ? [{id:'u1',nombre:'Repa ZAS',rol:'repartidor',activo:true,empresa_reparto_id:1},
+                                  {id:'u9',nombre:'Repa Rapiditos',rol:'repartidor',activo:true,empresa_reparto_id:9}]
+    : t === 'pedidos'          ? [{id:1,codigo:'A',cliente_id:1,empresa_reparto_id:1,estado:'pendiente',cliente_nombre:'x',direccion:'y',fecha_pedido:'2026-08-04',creado_en:'2026-08-04T09:00:00Z'},
+                                  {id:2,codigo:'B',cliente_id:2,empresa_reparto_id:9,estado:'pendiente',cliente_nombre:'x',direccion:'y',fecha_pedido:'2026-08-04',creado_en:'2026-08-04T09:00:00Z'},
+                                  {id:3,codigo:'C',cliente_id:2,empresa_reparto_id:null,estado:'pendiente',cliente_nombre:'x',direccion:'y',fecha_pedido:'2026-08-04',creado_en:'2026-08-04T09:00:00Z'}]
+    : [];
+  eval("soySuper = true; miEmpresa = 1;");
+  await window.cargarTodo();
+  ok('0f. el dueño NO ve repartidores de otra empresa en el panel de ZAS',
+      !eval("perfiles").some(p=>p.nombre==='Repa Rapiditos'), eval("JSON.stringify(perfiles.map(p=>p.nombre))"));
+  ok('0g. tampoco los clientes de la otra', !eval("clientes").some(c=>c.nombre==='Cliente de la otra'),
+      eval("JSON.stringify(clientes.map(c=>c.nombre))"));
+  ok('0h. ni sus pedidos', eval("pedidos").length===1 && eval("pedidos[0].codigo")==='A',
+      eval("JSON.stringify(pedidos.map(p=>p.codigo))"));
+  ok('0i. ni el pool de un cliente que no es suyo', eval("poolPedidos").length===0,
+      eval("JSON.stringify(poolPedidos.map(p=>p.codigo))"));
+  ok('0j. le avisa qué empresa está mirando',
+      $('avisoEmpresa').style.display==='block' && /Envíos ZAS/.test($('avisoEmpresa').textContent),
+      $('avisoEmpresa').textContent.slice(0,90));
+
   window.__sel = () => [];
 
   // =====================================================================
@@ -95,14 +125,14 @@ const r = await page.evaluate(async () => {
   ok('1. el pool muestra por qué cayó cada pedido', /calzan parejo/.test(tp) && /venció el plazo/.test(tp) && /ninguna empresa cubre/.test(tp));
   ok('1b. sigue mostrando los 3 del pool', document.querySelectorAll('#tbodyPool tr').length===3);
 
-  // ---------- 2. el aviso del tope ----------
+  // ---------- 2. el pool ya no se toma con el mouse ----------
   const pr = $('poolReglas');
-  ok('2. avisa cuánto más se puede llevar', pr.style.display==='block' && /te podés llevar 5 más/.test(pr.textContent), pr.textContent.slice(0,120));
-  ok('2b. avisa el plazo para asignar', /120 min/.test(pr.textContent));
-
-  eval(`pedidos = [1,2,3,4,5].map(i=>({id:100+i,cliente_id:1,estado:'pendiente',repartidor_id:null,codigo:'ZAS-1'+i,cliente_nombre:'x',direccion:'y',fecha_pedido:'2026-08-03',creado_en:'2026-08-03T09:00:00Z'}));`);
-  window.pintarReglasPool();
-  ok('2c. cuando llegás al tope, lo dice', /llegaste al tope \(5 sin repartidor\)/.test($('poolReglas').textContent), $('poolReglas').textContent.slice(0,140));
+  ok('2. explica que se reclama escaneando', pr.style.display==='block' &&
+      /escanee la etiqueta/.test(pr.textContent), pr.textContent.slice(0,120));
+  ok('2b. no quedó ningún botón de tomar en el pool',
+      !/Tomar/.test($('tbodyPool').innerHTML), '');
+  ok('2c. ni casillas para seleccionar', !/type="checkbox"/.test($('tbodyPool').innerHTML), '');
+  ok('2d. dice cuántos hay esperando', /3 pedidos esperando/.test(pr.textContent), pr.textContent.slice(0,60));
 
   // ---------- 3. el reloj para asignar repartidor ----------
   eval(`pedidos = [
