@@ -288,6 +288,107 @@ const r = await page.evaluate(async () => {
        /12 no se pudieron asignar/.test(window.__ultimoToast || ''), window.__ultimoToast);
   }
 
+  // ============================================================
+  // 15. EL CASO REAL DE HOY: TODO COMPARTIDO
+  //     La red está instalada y el cliente está en modo «abierto», así que
+  //     ningún pedido es de la empresa todavía.
+  // ============================================================
+  window.__planes = [];
+  eval(`
+    HAY_POOL = true; miEmpresa = 1;
+    sb.rpc = async (n, a) => {
+      window.__rpcs = window.__rpcs || []; window.__rpcs.push({n, a});
+      if (window.__sinMigracion)
+        return { data:null, error:{message:'Could not find the function public.planificar_pedidos'} };
+      const ids = (a && a.p_ids) || [];
+      const malos = ids.filter(id => window.__malos && window.__malos.has(id));
+      const buenos = ids.filter(id => !(window.__malos && window.__malos.has(id)));
+      buenos.forEach((id, i) => window.__planes.push({pedido_id:id, orden:i+1, rep:a.p_repartidor}));
+      return { data:{ planificados: buenos.length,
+                      rechazados: malos.map(id => ({id, motivo:'fuera de la zona de reparto'})) },
+               error:null };
+    };
+  `);
+
+  {
+    const lista = hacerPedidos(120, 20).map(p => ({...p,
+      fecha_pedido:'2026-08-04', empresa_reparto_id:null}));
+    window.__lista = lista;
+    window.__planes = []; window.__rpcs = [];
+    await correrBoton(lista, [60, 60]);
+    ok('15. con todo compartido, nada se escribe en la tabla de pedidos',
+       window.__escritos.length === 0, String(window.__escritos.length));
+    ok('15b. y los 120 quedan planificados', window.__planes.length === 120,
+       String(window.__planes.length));
+    ok('15c. 60 para cada repartidor',
+       new Set(window.__planes.map(p => p.rep)).size === 2 &&
+       window.__planes.filter(p => p.rep === window.__planes[0].rep).length === 60,
+       JSON.stringify(window.__planes.reduce((m,p)=>(m[p.rep]=(m[p.rep]||0)+1,m),{})));
+    ok('15d. el aviso dice que son "previstos"',
+       /previstos/.test(window.__ultimoToast || ''), window.__ultimoToast);
+  }
+
+  // ---------- 16. el orden de ruta va al plan, no a los pedidos ----------
+  {
+    const lista = hacerPedidos(20, 0).map(p => ({...p,
+      fecha_pedido:'2026-08-04', empresa_reparto_id:null}));
+    window.__lista = lista;
+    window.__planes = []; window.__orden = [];
+    await correrBoton(lista, [20]);
+    ok('16. NO se intenta escribir ruta_orden en pedidos ajenos',
+       window.__orden.length === 0, String(window.__orden.length));
+    ok('16b. el orden va en el plan, del 1 al 20',
+       window.__planes.map(p => p.orden).join(',') ===
+         Array.from({length:20}, (_, i) => i + 1).join(','),
+       window.__planes.map(p => p.orden).join(','));
+    ok('16c. y ese orden es el de la ruta, no el de la tabla',
+       window.__planes.map(p => p.pedido_id).join(',') !==
+         lista.map(p => p.id).join(','),
+       window.__planes.map(p => p.pedido_id).slice(0, 6).join(','));
+  }
+
+  // ---------- 17. mezcla: unos míos y otros compartidos ----------
+  {
+    const lista = hacerPedidos(40, 0).map((p, i) => ({...p,
+      fecha_pedido:'2026-08-04', empresa_reparto_id: i < 20 ? 1 : null}));
+    window.__lista = lista;
+    window.__planes = []; window.__escritos = []; window.__orden = [];
+    await correrBoton(lista, [40]);
+    ok('17. los míos se asignan de verdad', window.__escritos.length === 20,
+       String(window.__escritos.length));
+    ok('17b. y los compartidos quedan previstos', window.__planes.length === 20,
+       String(window.__planes.length));
+    ok('17c. el orden de ruta solo se escribe en los míos',
+       window.__orden.length === 20, String(window.__orden.length));
+  }
+
+  // ---------- 18. la base rechaza algunos: se explica el motivo ----------
+  {
+    const lista = hacerPedidos(30, 0).map(p => ({...p,
+      fecha_pedido:'2026-08-04', empresa_reparto_id:null}));
+    window.__lista = lista;
+    window.__malos = new Set(lista.slice(0, 7).map(p => p.id));
+    window.__planes = [];
+    await correrBoton(lista, [30]);
+    window.__malos = null;
+    ok('18. avisa cuántos no entraron', /7 no se pudieron asignar/.test(window.__ultimoToast || ''),
+       window.__ultimoToast);
+    ok('18b. y por qué', /fuera de la zona de reparto/.test(window.__ultimoToast || ''),
+       window.__ultimoToast);
+  }
+
+  // ---------- 19. sin la migración corrida ----------
+  {
+    const lista = hacerPedidos(10, 0).map(p => ({...p,
+      fecha_pedido:'2026-08-04', empresa_reparto_id:null}));
+    window.__lista = lista;
+    window.__sinMigracion = true;
+    await correrBoton(lista, [10]);
+    window.__sinMigracion = false;
+    ok('19. si falta el SQL lo dice claro, no falla en silencio',
+       /migracion-plan-y-carga/.test(window.__errUI || ''), window.__errUI);
+  }
+
   return out;
 });
 

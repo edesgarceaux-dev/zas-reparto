@@ -1902,24 +1902,33 @@ $('autoGo').onclick = async ()=>{
     const { grupos, fuera } = repartirEnSectores(autoLista, cupos, prefs);
     const resumen = [];
     let pedidosTotal = 0, escritosTotal = 0;
+    const rechazos = [];
     for(let g=0; g<elegidos.length; g++){
       if(!grupos[g].length) continue;
-      const ids = grupos[g].map(p=>p.id);
+      /* 🐛 v1.43 — PRIMERO se ordena la ruta y DESPUÉS se asigna.
+         Antes se asignaba y después se guardaba el orden en `pedidos`, pero
+         un pedido compartido no es tuyo: esa escritura no entraba y la ruta
+         quedaba desordenada. Ahora los ids se mandan ya en orden de ruta:
+         los tuyos van a `pedidos.ruta_orden` y los compartidos a
+         `plan_reparto.orden`. */
+      const ordenados = ordenarGrupoPorCercania(grupos[g]);
+      const ids = ordenados.map(p=>p.id);
       $('autoErr').style.color = 'var(--muted)';
       $('autoErr').textContent = `Asignando a ${nombreDe(elegidos[g])} (${g+1} de ${elegidos.length})…`;
       const r = await asignarRepartidorA(ids, elegidos[g]);
       if(r.errores.length) throw new Error(r.errores[0]);
       pedidosTotal  += ids.length;
       escritosTotal += r.n;
-      // orden preliminar de ruta por cercanía (después se afina con OSRM en Mapa)
-      await guardarOrdenDeRuta(ordenarGrupoPorCercania(grupos[g]));
+      if(r.rechazados?.length) rechazos.push(...r.rechazados);
+      // el orden de los que YA son míos va en la tabla de pedidos
+      await guardarOrdenDeRuta(ordenados.filter(p=>!esCompartido(p)));
       resumen.push(`${nombreDe(elegidos[g])} (${r.n}${r.previstos ? ` · ${r.previstos} previstos` : ''})`);
     }
     cerrar('mAuto'); limpiarSeleccion();
     const faltaron = pedidosTotal - escritosTotal;
     toast('🤖 Repartidos por sectores: '+resumen.join(' · ')
       + (fuera.length ? ` · ${fuera.length} quedaron sin asignar (no alcanzaban los cupos)` : '')
-      + (faltaron > 0 ? ` · ⚠️ ${faltaron} no se pudieron asignar: recargá y revisá si alguien los tomó primero` : '')
+      + (faltaron > 0 ? ` · ⚠️ ${faltaron} no se pudieron asignar${motivosCortos(rechazos)}` : '')
       + ' — cada ruta ya viene ordenada; afínala con ✨ Optimizar en Mapa');
     cargarTodo();
   }catch(e){
@@ -1929,6 +1938,17 @@ $('autoGo').onclick = async ()=>{
   }
   finally{ $('autoGo').disabled = false; }
 };
+
+/* Resume por qué la base dejó pedidos afuera, agrupando motivos iguales:
+   "3 fuera de la zona de reparto · 1 ya está entregado" en vez de una lista
+   de 4 códigos que no le dice nada a nadie. */
+function motivosCortos(rechazos){
+  if(!rechazos || !rechazos.length) return '';
+  const c = {};
+  for(const r of rechazos){ const m = r.motivo || 'sin motivo'; c[m] = (c[m]||0)+1; }
+  return ': ' + Object.entries(c).sort((a,b)=>b[1]-a[1])
+    .map(([m,n])=>`${n} ${m}`).join(' · ');
+}
 
 /* Guarda el orden de la ruta. 🐛 v1.43 — antes era UNA llamada por pedido,
    en fila: con 250 bultos eran 250 viajes al servidor, tardaba minutos y si
@@ -2797,15 +2817,23 @@ async function asignarRepartidorA(ids, rep){
     }
   }
   const asignados = n;
-  let previstos = 0;
+  let previstos = 0, rechazados = [];
   if(compartidos.length){
+    /* Los ids van EN ORDEN DE RUTA: la base guarda esa posición en
+       plan_reparto.orden, que es lo que después ordena la ruta del
+       repartidor. Un compartido no es nuestro todavía, así que su orden no
+       se puede escribir en la tabla `pedidos`. */
     const { data, error } = await sb.rpc('planificar_pedidos', { p_ids: compartidos, p_repartidor: rep || null });
     if(error) errores.push(/planificar_pedidos/.test(error.message)
       ? 'Falta correr migracion-plan-y-carga.sql en Supabase.' : error.message);
-    else { previstos = (data?.planificados || 0); n += previstos; }
+    else {
+      previstos  = (data?.planificados || 0);
+      rechazados = data?.rechazados || [];
+      n += previstos;
+    }
   }
-  return { n, asignados, previstos, compartidos: compartidos.length,
-           errores, noEscritos, pedidos: ids.length };
+  return { n, asignados, previstos, rechazados, compartidos: compartidos.length,
+           mios, errores, noEscritos, pedidos: ids.length };
 }
 
 /* ---------- SELECCIÓN Y ACCIONES MASIVAS ---------- */

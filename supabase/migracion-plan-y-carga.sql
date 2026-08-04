@@ -103,19 +103,25 @@ grant execute on function public.puedo_planificar(bigint) to authenticated;
 -- 5. ASIGNAR UN REPARTIDOR A UN PEDIDO COMPARTIDO
 --    No toca el pedido: escribe el plan de MI empresa.
 -- ============================================================
+-- El ORDEN de la ruta importa: p_ids viene en el orden en que el repartidor
+-- va a pasar por las direcciones, y esa posición se guarda en `orden`.
+-- Un pedido compartido todavía no es de nadie, así que su `ruta_orden` no se
+-- puede escribir en la tabla `pedidos` (las políticas no lo dejan, y con razón:
+-- no es tuyo). Por eso el orden de los compartidos vive acá.
 create or replace function public.planificar_pedidos(
   p_ids bigint[], p_repartidor uuid, p_nota text default null)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare
   v_emp bigint;
   v_n   int := 0;
+  v_no  bigint[];
 begin
   v_emp := public.mi_empresa_reparto();
   if v_emp is null or not public.es_admin() then
     raise exception 'Solo un administrador de una empresa de reparto puede planificar';
   end if;
   if p_ids is null or array_length(p_ids,1) is null then
-    return jsonb_build_object('planificados', 0);
+    return jsonb_build_object('planificados', 0, 'rechazados', '[]'::jsonb);
   end if;
 
   -- el repartidor tiene que ser de mi empresa
@@ -125,18 +131,37 @@ begin
     raise exception 'Ese repartidor no es de tu empresa';
   end if;
 
-  insert into public.plan_reparto (pedido_id, empresa_reparto_id, repartidor_id, nota, creado_por)
-  select x.id, v_emp, p_repartidor, p_nota, auth.uid()
-    from unnest(p_ids) as x(id)
+  insert into public.plan_reparto (pedido_id, empresa_reparto_id, repartidor_id, orden, nota, creado_por)
+  select x.id, v_emp, p_repartidor, x.pos, p_nota, auth.uid()
+    from unnest(p_ids) with ordinality as x(id, pos)
    where public.puedo_planificar(x.id)
   on conflict (pedido_id, empresa_reparto_id) do update
      set repartidor_id = excluded.repartidor_id,
+         orden = excluded.orden,
          nota = excluded.nota,
          creado_por = excluded.creado_por,
          creado_en = now();
 
   get diagnostics v_n = row_count;
-  return jsonb_build_object('planificados', v_n);
+
+  -- los que quedaron afuera y por qué: fuera de zona, ya entregados, de otra
+  -- empresa, o de un cliente que no trabaja con vos
+  select coalesce(array_agg(x.id), '{}') into v_no
+    from unnest(p_ids) as x(id)
+   where not public.puedo_planificar(x.id);
+
+  return jsonb_build_object(
+    'planificados', v_n,
+    'rechazados', coalesce((
+      select jsonb_agg(jsonb_build_object(
+               'id', p.id, 'codigo', p.codigo,
+               'motivo', case
+                 when p.empresa_reparto_id is not null then 'ya es de otra empresa'
+                 when p.estado in ('entregado','cancelado') then 'ya está ' || p.estado
+                 when p.zona = 'fuera' then 'fuera de la zona de reparto'
+                 when p.zona = 'revisar' then 'no trae comuna'
+                 else 'ese cliente no trabaja con tu empresa' end))
+        from public.pedidos p where p.id = any(v_no)), '[]'::jsonb));
 end $$;
 grant execute on function public.planificar_pedidos(bigint[], uuid, text) to authenticated;
 

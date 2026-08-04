@@ -1,6 +1,6 @@
 # TODO LO QUE HAY QUE HACER — en orden
 
-Panel v1.43 · Maestro v1.2 · APK v2.8.0
+Panel v1.43 · Maestro v1.2 · APK v2.8.1
 Hacelo de arriba abajo, sin saltear. Toma unos 20 minutos.
 
 ---
@@ -44,7 +44,7 @@ la raíz de `zas-reparto\` (pisando lo que haya):
 
 ```
 git add index.html panel-maestro.html seguimiento.html panel/ supabase/ test-*.mjs PASOS-RED.md
-git add ZAS-Reparto-v2.8.0-moderno.apk ZAS-Reparto-v2.8.0-antiguo.apk
+git add ZAS-Reparto-v2.8.1-moderno.apk ZAS-Reparto-v2.8.1-antiguo.apk
 git commit -m "v1.43 filtros, n° de envío ML y arreglo del reparto automático"
 git push
 ```
@@ -55,7 +55,7 @@ Esperá ~1 minuto a que GitHub Pages reconstruya y entrá con **Ctrl+F5**.
 
 ## 3. Instalar la APK
 
-**`ZAS-Reparto-v2.8.0-moderno.apk`** en los teléfonos de los repartidores
+**`ZAS-Reparto-v2.8.1-moderno.apk`** en los teléfonos de los repartidores
 **y en el del que reparte la pega en bodega**.
 (La `-antiguo` es solo para teléfonos viejos de 32 bits.)
 
@@ -142,10 +142,19 @@ Asignaba de menos por dos motivos, los dos arreglados:
    estuviera lleno, y el resumen contaba lo que había *pedido*, no lo que la base
    había *escrito*.
 
+3. **El orden de la ruta se perdía en los pedidos compartidos.** El orden se
+   escribía en la tabla `pedidos`, pero un pedido compartido todavía no es de tu
+   empresa: esa escritura no entraba (y está bien que no entre, no es tuyo). El
+   repartidor recibía la ruta desordenada. Ahora el orden de los compartidos se
+   guarda en el plan, y la app lo lee de ahí.
+
 Además, cuando se acaban los pedidos de las comunas de preferencia, ahora completa
 con los **más cercanos a ese sector**, no con los más cercanos al centro móvil del
 grupo — antes una ruta que arrancaba en Maipú terminaba con bultos en Recoleta.
 Y el orden de ruta se guarda de a 40 en paralelo: con 250 bultos tardaba minutos.
+
+Y cuando la base deja pedidos afuera, ahora te dice **por qué**, agrupado:
+«7 no se pudieron asignar: 5 fuera de la zona de reparto · 2 ya está entregado».
 
 ---
 
