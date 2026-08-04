@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ZAS Reparto — Panel de Control</title>
-<!-- panel v1.36 -->
+<!-- panel v1.37 -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -156,6 +156,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
   </header>
 
   <main>
+    <div id="avisoEmpresa" style="display:none;background:#EEF4FF;border:1px solid #C9DAF8;color:#1e3a6b;border-radius:10px;padding:9px 14px;margin-bottom:14px;font-size:12.5px"></div>
     <!-- Resumen -->
     <section id="t-resumen">
       <div class="tiles" id="tiles"></div>
@@ -710,14 +711,16 @@ const EST = {
 };
 const FIN = ['entregado','cancelado','no_entregado'];
 let pedidos = [], perfiles = [], clientes = [], filtro = 'activos', busq = '', clienteEditando = null;
-/* ---- POOL / RED DE EMPRESAS DE REPARTO (v1.36) ---- */
+/* ---- POOL / RED DE EMPRESAS DE REPARTO (v1.37) ---- */
 let empresas = [], habilitaciones = [], poolPedidos = [];
 let miEmpresa = null, soySuper = false, HAY_POOL = false;
 /* v1.33: reglas de reparto del cliente y frenos anti-acaparamiento */
 let configRed = { plazo_asignar_min:120, tope_sin_asignar:30 };
 let poolSel = new Set(), poolComunaSel = '', poolBusq = '', empresaEditando = null;
 const empresaDe = id => (empresas.find(e=>e.id===id)||{}).nombre;
-const clienteDe = id => (clientes.find(c=>c.id===id)||{}).nombre;
+let clientesRed = [];   // todos los que la base me deja ver (para nombrar invitaciones)
+const clienteDe = id => (clientes.find(c=>c.id===id)
+                      || clientesRed.find(c=>c.id===id) || {}).nombre;
 const $ = id => document.getElementById(id);
 const esc = s => (s??'').toString().replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const clp = n => n==null?'—':'$'+Number(n).toLocaleString('es-CL');
@@ -2061,13 +2064,38 @@ async function cargarTodo(){
   ]);
   perfiles = p1.data||[]; clientes = p3.data||[];
   empresas = p4.data||[]; habilitaciones = p5.data||[];
+  clientesRed = clientes;
   if(p6 && p6.data) configRed = p6.data;
   // ¿ya está corrida la migración de la red?
   // 🐛 v1.36: antes se miraba si algún pedido traía la columna. Una empresa
   // nueva no tiene ni un pedido, así que daba "no está corrida" y le
   // escondía el Pool, el botón de sumar clientes y las invitaciones.
   HAY_POOL = !p4.error && !p7.error;
-  repartirPedidos(p2.data||[]);
+
+  /* 🔒 v1.37 — ESTE PANEL ES EL DE UNA SOLA EMPRESA.
+     La base le deja ver todo al dueño del sistema, y para el panel maestro
+     está bien, pero acá le mezclaba los repartidores, los clientes y los
+     pedidos de las otras empresas. Filtramos a "mi empresa" para todos por
+     igual: la red completa se mira en el maestro. */
+  let todos = p2.data||[];
+  if(HAY_POOL && miEmpresa){
+    const misClientes = new Set(habilitaciones
+      .filter(h=>h.empresa_reparto_id===miEmpresa && h.estado==='activa' && h.activo!==false)
+      .map(h=>h.cliente_id));
+    perfiles = perfiles.filter(p=> p.empresa_reparto_id===miEmpresa || p.id===adminUid);
+    clientes = clientes.filter(c=> misClientes.has(c.id));
+    todos    = todos.filter(p=> p.empresa_reparto_id===miEmpresa
+                             || (p.empresa_reparto_id==null && misClientes.has(p.cliente_id)));
+  }
+  repartirPedidos(todos);
+
+  const aviso = $('avisoEmpresa');
+  if(aviso){
+    const mia = (empresas.find(e=>e.id===miEmpresa)||{}).nombre;
+    aviso.style.display = (soySuper && HAY_POOL && mia) ? 'block' : 'none';
+    if(mia) aviso.innerHTML = '👀 Estás viendo el panel de <b>'+esc(mia)+'</b>: solo su gente, sus clientes y sus pedidos. '
+      + 'Para ver toda la red entrá al <a href="panel-maestro.html" style="color:inherit"><b>🛰️ panel maestro</b></a>.';
+  }
   $('navPool').style.display     = HAY_POOL ? '' : 'none';
   $('navEmpresas').style.display = (HAY_POOL && soySuper) ? '' : 'none';
   if($('navMaestro')) $('navMaestro').style.display = soySuper ? '' : 'none';
@@ -2891,9 +2919,13 @@ function limitesDe(clienteId){
   return { plazo, tope };
 }
 
-/* cuántos tenés tomados sin repartidor, por cliente */
+/* cuántos te llevaste DEL POOL y siguen sin repartidor, por cliente.
+   v1.37: cuenta solo los que salieron del pool (tomado_por). Lo que llega
+   por las reglas del cliente no cuenta: el freno es para el que acapara
+   del pool, no para el que tiene mucho trabajo. */
 function tomadosSinAsignar(clienteId){
-  return pedidos.filter(p=>p.cliente_id===clienteId && p.estado==='pendiente' && !p.repartidor_id).length;
+  return pedidos.filter(p=>p.cliente_id===clienteId && p.estado==='pendiente'
+                        && !p.repartidor_id && p.tomado_por).length;
 }
 
 /* minutos que faltan para que un pedido vuelva solo al pool */
@@ -2930,7 +2962,7 @@ function pintarReglasPool(){
     const libre = Math.max(0, tope - usado);
     const nom = clienteDe(id) || 'ese cliente';
     return libre === 0
-      ? `<b>${esc(nom)}</b>: llegaste al tope (${tope} sin repartidor). Asigná los que tenés y volvé.`
+      ? `<b>${esc(nom)}</b>: ya tenés ${tope} pedidos tomados del pool sin repartidor. Asignales repartidor y volvé.`
       : `<b>${esc(nom)}</b>: te podés llevar ${libre} más y tenés ${plazo} min para asignarles repartidor.`;
   });
   caja.style.display='block';
