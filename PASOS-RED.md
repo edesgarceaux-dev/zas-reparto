@@ -1,11 +1,11 @@
 # TODO LO QUE HAY QUE HACER — en orden
 
-Panel v1.42 · Maestro v1.2 · APK v2.8.0
+Panel v1.43 · Maestro v1.2 · APK v2.8.0
 Hacelo de arriba abajo, sin saltear. Toma unos 20 minutos.
 
 ---
 
-## 1. Correr 5 archivos SQL, EN ESTE ORDEN
+## 1. Correr los archivos SQL, EN ESTE ORDEN
 
 Supabase → **SQL Editor** → **New query** → pegar todo el archivo → **Run**.
 Uno por uno. Todos son seguros de repetir. Están en la carpeta `supabase/`.
@@ -38,14 +38,14 @@ la raíz de `zas-reparto\` (pisando lo que haya):
 
 | Archivo que te mandé | Dónde va |
 |---|---|
-| `index.html` | raíz — **es el panel v1.40 ya renombrado** |
+| `index.html` | raíz — **es el panel v1.43 ya renombrado** |
 | `panel-maestro.html` | raíz |
 | `seguimiento.html` | raíz |
 
 ```
 git add index.html panel-maestro.html seguimiento.html panel/ supabase/ test-*.mjs PASOS-RED.md
 git add ZAS-Reparto-v2.8.0-moderno.apk ZAS-Reparto-v2.8.0-antiguo.apk
-git commit -m "v1.42 asignar por QR + permisos de panel y app"
+git commit -m "v1.43 filtros, n° de envío ML y arreglo del reparto automático"
 git push
 ```
 
@@ -115,7 +115,41 @@ que pasó por error.
 
 ---
 
-## 6. MercadoLibre en piloto automático
+## 6. Lo nuevo de la tabla de pedidos (v1.43)
+
+- **Se fue la columna «Código»**: el código interno de ZAS no le servía a nadie.
+  Igual se puede seguir buscando por él en el buscador.
+- **La columna ahora es «N° de envío»**: en las ventas de MercadoLibre muestra el
+  **n° de envío**, que es el que va impreso en la etiqueta y el que se escanea —
+  antes salía el n° de orden, que no está en ninguna parte del paquete. Si a una
+  venta ML todavía le falta el envío, sale el n° de orden con un **⚠️**: esas son
+  las que arregla «🔄 Sincronizar envíos ML».
+- **Dos listas desplegables** al lado del buscador: **Estado** y **Repartidor**.
+  Se combinan entre ellas, con los chips de arriba y con lo que escribas. La de
+  repartidor dice cuántos lleva cada uno, y tiene «Sin repartidor». Cuando hay un
+  filtro puesto los desplegables se pintan de naranja y aparece una **✕** para
+  sacarlos.
+
+### El reparto automático: qué estaba fallando
+
+Asignaba de menos por dos motivos, los dos arreglados:
+
+1. **El grande**: el panel trataba como «compartido» a cualquier pedido sin
+   empresa. En una base donde esa columna todavía no existe, eso daba *todos*.
+   Así que «🤖 Repartir auto» no los asignaba: los mandaba a planificar, y el
+   reparto se cortaba a la mitad.
+2. Los pedidos **sin ubicar en el mapa** se metían a los grupos aunque el cupo ya
+   estuviera lleno, y el resumen contaba lo que había *pedido*, no lo que la base
+   había *escrito*.
+
+Además, cuando se acaban los pedidos de las comunas de preferencia, ahora completa
+con los **más cercanos a ese sector**, no con los más cercanos al centro móvil del
+grupo — antes una ruta que arrancaba en Maipú terminaba con bultos en Recoleta.
+Y el orden de ruta se guarda de a 40 en paralelo: con 250 bultos tardaba minutos.
+
+---
+
+## 7. MercadoLibre en piloto automático
 
 **El problema ya casi no existe**: `ml-notif` guarda el n° de envío al entrar la
 venta, y funciona — 237 de 238 ventas en tres días entraron completas. El botón

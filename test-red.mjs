@@ -34,7 +34,8 @@ const r = await page.evaluate(async () => {
         maybeSingle:()=>Promise.resolve({data:window.__sel(t)[0]||null,error:null}),
         gte:()=>o, not:()=>o, in:()=>o,
         then:(f)=>Promise.resolve({data:window.__sel(t),error:null}).then(f) }; return o; },
-      update: (v) => { const o = { eq: ()=>o, in: ()=>o, not: ()=>o, then:(f)=>{ window.__upd.push({t,v}); return Promise.resolve({error:null}).then(f); } }; return o; },
+      update: (v) => { const o = { eq: ()=>o, in: (c,ids)=>{ o.__ids=ids; return o; }, not: ()=>o, select: ()=>o,
+        then:(f)=>{ window.__upd.push({t,v}); return Promise.resolve({data:(o.__ids||[]).map(id=>({id})), error:null}).then(f); } }; return o; },
       delete: () => { const o = { eq: ()=>o, then:(f)=>{ window.__del.push({t}); return Promise.resolve({error:null}).then(f); } }; return o; },
       insert: (v) => ({ then:(f)=>{ window.__ins.push({t,v}); return Promise.resolve(window.__insErr||{error:null}).then(f); } }),
     });

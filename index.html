@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ZAS Reparto — Panel de Control</title>
-<!-- panel v1.42 -->
+<!-- panel v1.43 -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -190,7 +190,10 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
       <div class="bar">
         <div id="chipsFiltros" style="display:flex;gap:8px;flex-wrap:wrap"></div>
         <span class="sp"></span>
-        <input type="search" id="buscar" placeholder="Buscar cliente, dirección, código…">
+        <input type="search" id="buscar" placeholder="Buscar cliente, dirección, n° de envío…">
+        <select id="fEstado" style="width:auto;padding:7px 10px;font-size:13px" title="Filtrar por estado"></select>
+        <select id="fRep" style="width:auto;padding:7px 10px;font-size:13px" title="Filtrar por repartidor"></select>
+        <button class="btn btn-ghost" id="fLimpiar" onclick="limpiarFiltros()" style="display:none" title="Sacar los filtros">✕</button>
         <button class="btn btn-ghost" id="btnAuto" onclick="abrirAutoRepartir()">🤖 Repartir auto</button>
         <button class="btn btn-ghost" id="btnCargaQr" onclick="abrirCargaQr()">🔳 Cargar por QR</button>
         <button class="btn btn-ghost" id="btnSyncMl" onclick="sincronizarEnviosMl()" title="Rellena el n° de envío de las ventas Flex para que la app pueda escanear sus etiquetas">🔄 Sincronizar envíos ML</button>
@@ -208,7 +211,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         <button class="btn btn-ghost" style="color:#fff;border-color:#666" onclick="limpiarSeleccion()">✕ Limpiar</button>
       </div>
       <div class="tbl"><table id="tblPedidos">
-        <thead><tr><th><input type="checkbox" id="selTodos" onclick="seleccionarTodos(this.checked)"></th><th>Código</th><th>Cód. envío</th><th>Cliente final</th><th>Teléfono</th><th>Dirección</th><th>Comuna</th><th>Empresa</th><th>Repartidor</th><th>Estado</th><th>Fecha pedido</th><th></th></tr></thead>
+        <thead><tr><th><input type="checkbox" id="selTodos" onclick="seleccionarTodos(this.checked)"></th><th>N° de envío</th><th>Cliente final</th><th>Teléfono</th><th>Dirección</th><th>Comuna</th><th>Empresa</th><th>Repartidor</th><th>Estado</th><th>Fecha pedido</th><th></th></tr></thead>
         <tbody id="tbodyPed"></tbody>
       </table></div>
     </section>
@@ -760,12 +763,21 @@ const EST = {
 };
 const FIN = ['entregado','cancelado','no_entregado'];
 let pedidos = [], perfiles = [], clientes = [], filtro = 'activos', busq = '', clienteEditando = null;
+/* v1.43 — filtros de las dos listas desplegables, arriba de la tabla */
+let fEstado = '', fRep = '';
 /* ---- RED DE EMPRESAS DE REPARTO (v1.40) ---- */
 let empresas = [], habilitaciones = [], poolPedidos = [];
 let miEmpresa = null, soySuper = false, HAY_POOL = false;
 /* v1.40 — planes de MI empresa sobre pedidos compartidos, y avisos */
 let misPlanes = [], avisosRed = [];
-const esCompartido = p => p && p.empresa_reparto_id == null;
+/* 🐛 v1.43 — «compartido» solo existe si la red de empresas está instalada.
+   Antes esto era `p.empresa_reparto_id == null` a secas: en una base sin la
+   migración la columna ni existe, llega `undefined`, y `undefined == null`
+   da TRUE. Resultado: TODOS los pedidos se trataban como compartidos, así
+   que «🤖 Repartir auto» no los asignaba — los mandaba a planificar_pedidos,
+   que en esa base no existe, y el reparto se cortaba a la mitad.
+   Por eso asignaba menos de lo que le pedías. */
+const esCompartido = p => !!p && HAY_POOL && p.empresa_reparto_id == null;
 const planDe = id => misPlanes.find(x=>x.pedido_id===id) || null;
 /* v1.33: reglas de reparto del cliente y frenos anti-acaparamiento */
 let configRed = { plazo_asignar_min:120, tope_sin_asignar:30 };
@@ -1850,60 +1862,88 @@ window.abrirAutoRepartir = ()=>{
   $('autoErr').textContent='';
   $('mAuto').classList.add('on');
 };
+/* Cuánto le toca a cada uno. Número escrito = fijo; vacío = "auto", que se
+   reparte parejo lo que sobre. Devuelve {cupos, sobrante, error}. */
+function calcularCupos(cuposFijos, total){
+  const sumaFija = cuposFijos.reduce((s,c)=>s+(c||0),0);
+  const autos    = cuposFijos.filter(c=>c===null).length;
+  if(sumaFija > total){
+    return { cupos:null, sobrante:0,
+             error:`Las cantidades suman ${sumaFija}, pero solo hay ${total} pedidos.` };
+  }
+  const sobrante = total - sumaFija;
+  if(!autos) return { cupos:[...cuposFijos], sobrante, error:null };
+  const base = Math.floor(sobrante/autos);
+  const cupos = cuposFijos.map(c=> c===null ? base : c);
+  // el resto de la división se reparte de a uno entre los "auto"
+  let extras = sobrante - base*autos;
+  for(let i=0;i<cupos.length && extras>0;i++){ if(cuposFijos[i]===null){ cupos[i]++; extras--; } }
+  return { cupos, sobrante:0, error:null };
+}
+
 $('autoGo').onclick = async ()=>{
   const marcados = [...document.querySelectorAll('#autoReps input[type="checkbox"]:checked')];
   const elegidos = marcados.map(i=>i.value);
   if(!elegidos.length){ $('autoErr').textContent='Marca al menos un repartidor.'; return; }
-  // cupos: número escrito = fijo; vacío = "auto" (se reparte parejo lo que sobre)
   const total = autoLista.length;
   const cuposFijos = elegidos.map(id=>{
     const v = document.querySelector(`#autoReps input[data-cupo="${id}"]`)?.value;
     return v ? Math.max(1, Number(v)) : null;
   });
-  const sumaFija = cuposFijos.reduce((s,c)=>s+(c||0),0);
-  const autos = cuposFijos.filter(c=>c===null).length;
-  if(sumaFija > total){
-    $('autoErr').textContent = `Las cantidades suman ${sumaFija}, pero solo hay ${total} pedidos.`;
-    return;
+  const { cupos, sobrante, error } = calcularCupos(cuposFijos, total);
+  if(error){ $('autoErr').textContent = error; return; }
+  if(sobrante > 0){
+    if(!confirm(`Las cantidades suman ${total-sobrante} de ${total}: quedarán ${sobrante} pedidos SIN asignar (los más lejanos de cada sector). ¿Continuar?`)) return;
   }
-  const sobrante = total - sumaFija;
-  if(autos === 0 && sobrante > 0){
-    if(!confirm(`Las cantidades suman ${sumaFija} de ${total}: quedarán ${sobrante} pedidos SIN asignar (los más lejanos de cada sector). ¿Continuar?`)) return;
-  }
-  const cupos = cuposFijos.map(c=>{
-    if(c!==null) return c;
-    const base = Math.floor(sobrante/autos), extra = sobrante%autos;
-    return base; // extras se agregan abajo
-  });
-  // repartir el resto de la división entre los "auto"
-  let extras = autos ? sobrante - cupos.reduce((s,c,i)=>s+(cuposFijos[i]===null?c:0),0) : 0;
-  for(let i=0;i<cupos.length && extras>0;i++){ if(cuposFijos[i]===null){ cupos[i]++; extras--; } }
   $('autoGo').disabled = true;
   try{
     const prefs = elegidos.map(id=>
       (perfiles.find(x=>x.id===id)||{}).comuna_preferida || null);
     const { grupos, fuera } = repartirEnSectores(autoLista, cupos, prefs);
     const resumen = [];
+    let pedidosTotal = 0, escritosTotal = 0;
     for(let g=0; g<elegidos.length; g++){
       if(!grupos[g].length) continue;
       const ids = grupos[g].map(p=>p.id);
+      $('autoErr').style.color = 'var(--muted)';
+      $('autoErr').textContent = `Asignando a ${nombreDe(elegidos[g])} (${g+1} de ${elegidos.length})…`;
       const r = await asignarRepartidorA(ids, elegidos[g]);
       if(r.errores.length) throw new Error(r.errores[0]);
+      pedidosTotal  += ids.length;
+      escritosTotal += r.n;
       // orden preliminar de ruta por cercanía (después se afina con OSRM en Mapa)
-      const ordenados = ordenarGrupoPorCercania(grupos[g]);
-      for(let k=0; k<ordenados.length; k++){
-        await sb.from('pedidos').update({ruta_orden: k+1}).eq('id', ordenados[k].id);
-      }
-      resumen.push(`${nombreDe(elegidos[g])} (${ids.length})`);
+      await guardarOrdenDeRuta(ordenarGrupoPorCercania(grupos[g]));
+      resumen.push(`${nombreDe(elegidos[g])} (${r.n}${r.previstos ? ` · ${r.previstos} previstos` : ''})`);
     }
     cerrar('mAuto'); limpiarSeleccion();
+    const faltaron = pedidosTotal - escritosTotal;
     toast('🤖 Repartidos por sectores: '+resumen.join(' · ')
-      + (fuera.length ? ` · ${fuera.length} quedaron sin asignar` : '')
+      + (fuera.length ? ` · ${fuera.length} quedaron sin asignar (no alcanzaban los cupos)` : '')
+      + (faltaron > 0 ? ` · ⚠️ ${faltaron} no se pudieron asignar: recargá y revisá si alguien los tomó primero` : '')
       + ' — cada ruta ya viene ordenada; afínala con ✨ Optimizar en Mapa');
     cargarTodo();
-  }catch(e){ $('autoErr').textContent = 'Error: '+e.message; }
+  }catch(e){
+    $('autoErr').style.color = '';
+    $('autoErr').textContent = 'Error: '+e.message +
+      ' — puede que algunos repartidores ya hayan quedado asignados; recargá antes de repetir.';
+  }
   finally{ $('autoGo').disabled = false; }
 };
+
+/* Guarda el orden de la ruta. 🐛 v1.43 — antes era UNA llamada por pedido,
+   en fila: con 250 bultos eran 250 viajes al servidor, tardaba minutos y si
+   alguno fallaba nadie se enteraba. Ahora van de a 40 en paralelo y, si algo
+   falla, se avisa. */
+async function guardarOrdenDeRuta(ordenados){
+  const TANDA = 40;
+  for(let i=0; i<ordenados.length; i+=TANDA){
+    const tanda = ordenados.slice(i, i+TANDA);
+    const res = await Promise.all(tanda.map((p,k)=>
+      sb.from('pedidos').update({ruta_orden: i+k+1}).eq('id', p.id)));
+    const err = res.find(x=>x && x.error);
+    if(err) throw new Error('No se pudo guardar el orden de la ruta: '+err.error.message);
+  }
+}
 
 /* Agrupación por sectores COMPACTOS con cupos y comuna de preferencia:
    1. Primero los repartidores CON comuna de preferencia: su semilla es un
@@ -1951,36 +1991,55 @@ function repartirEnSectores(lista, cupos, prefs){
     while(grupo.length < c && restantes.length){
       const gx = grupo.reduce((s,p)=>s+p.lat,0)/grupo.length;
       const gy = grupo.reduce((s,p)=>s+p.lng,0)/grupo.length;
+      const centroide = {lat:gx, lng:gy};
+      /* 🐛 v1.43 — antes se medía solo contra el centro MÓVIL del grupo. Al
+         agregar pedidos el centro se corría, y una ruta que arrancaba en
+         Maipú terminaba con bultos en Recoleta: cada paso parecía "el más
+         cercano", pero el grupo se paseaba por la ciudad.
+         Ahora se mide contra el centro móvil Y contra la semilla (la comuna
+         de preferencia). Así el sector crece pegado a donde arrancó. */
+      const puntaje = q => distKm(q, centroide) + distKm(q, semilla);
       let mejor = -1, mejorD = Infinity;
       // 1) llenar con sus comunas preferidas, en orden de prioridad
       for(const comuna of pref){
         for(let k=0;k<restantes.length;k++){
           if(!coincide(restantes[k], comuna)) continue;
-          const d = distKm(restantes[k], {lat:gx, lng:gy});
+          const d = puntaje(restantes[k]);
           if(d < mejorD){ mejorD = d; mejor = k; }
         }
         if(mejor >= 0) break; // hay pedidos de esta comuna: no pasar a la siguiente
       }
-      // 2) si ya no quedan de sus comunas: seguir por cercanía normal
+      // 2) si ya no quedan de sus comunas: los más cercanos a su sector
       if(mejor < 0){
         mejorD = Infinity;
         for(let k=0;k<restantes.length;k++){
-          const d = distKm(restantes[k], {lat:gx, lng:gy});
+          const d = puntaje(restantes[k]);
           if(d < mejorD){ mejorD = d; mejor = k; }
         }
       }
+      if(mejor < 0) break;            // no debería pasar, pero no inventamos
       grupo.push(restantes.splice(mejor,1)[0]);
     }
     grupos[i] = grupo;
   }
-  // pedidos sin ubicar: a los grupos que aún tienen espacio (o parejo si están llenos)
-  let gi = 0;
+  /* Pedidos sin ubicar en el mapa: van a los grupos que TODAVÍA tienen
+     espacio, de a uno y por turnos para que queden parejos.
+     🐛 v1.43 — antes, cuando ya no quedaba espacio, se metían igual dando
+     vueltas por los grupos: el repartidor terminaba con más pedidos de los
+     que le habías puesto. Ahora los que no entran quedan sin asignar y el
+     panel te lo dice. */
+  const conEspacio = () => grupos
+    .map((g,j)=>({j, libre: cupos[j] - g.length}))
+    .filter(x=>x.libre > 0);
+  const sobran = [];
   for(const p of sin){
-    const ix = grupos.findIndex((g,j)=>g.length < cupos[j]);
-    if(ix >= 0) grupos[ix].push(p);
-    else { grupos[gi % n].push(p); gi++; }
+    const libres = conEspacio();
+    if(!libres.length){ sobran.push(p); continue; }
+    // al que más espacio le queda: así ninguna ruta se llena antes que otra
+    libres.sort((a,b)=> b.libre - a.libre || a.j - b.j);
+    grupos[libres[0].j].push(p);
   }
-  return { grupos, fuera: restantes };
+  return { grupos, fuera: [...restantes, ...sobran] };
 }
 
 /* Orden preliminar dentro del sector: vecino más cercano desde la bodega + 2-opt */
@@ -2307,8 +2366,90 @@ function pintarChips(){
     b.onclick = ()=>{ filtro = b.dataset.k; pintarPedidos(); });
 }
 
+/* v1.43 — el número que sirve para buscar un bulto en la mano.
+   · MercadoLibre Flex → el N° DE ENVÍO, que es el que va impreso en la
+     etiqueta y el que se escanea. Antes salía el n° de orden (ML-xxxx),
+     que no está en ningún lado del paquete.
+   · Jumpseller y los demás → el n° de pedido de la tienda.
+   · Si no hay ninguno, el código interno de ZAS como último recurso.
+   El código interno ya no ocupa una columna: no le sirve a nadie. */
+function numeroDeEnvio(p){
+  const marca = p.origen==='jumpseller'
+      ? ' <span style="color:#1baf7a" title="Automático desde Jumpseller">⚡</span>'
+    : p.origen==='mercadolibre'
+      ? ' <span style="color:#3483fa;font-weight:800" title="Automático desde MercadoLibre Flex">Ⓜ</span>'
+    : '';
+  if(p.origen==='mercadolibre' && p.envio_id) return esc(p.envio_id) + marca;
+  const externo = (p.externo_id||'').replace(/^ML-/,'');
+  if(externo) return '#'+esc(externo) + marca
+    + (p.origen==='mercadolibre'
+        ? ' <span class="cod" title="A esta venta le falta el n° de envío: apretá «Sincronizar envíos ML»">⚠️</span>'
+        : '');
+  return esc(p.codigo||'#'+p.id) + marca;
+}
+
+/* Lo mismo pero en texto pelado, para el buscador y las descargas. */
+function numeroDeEnvioTxt(p){
+  if(p.origen==='mercadolibre' && p.envio_id) return String(p.envio_id);
+  const externo = (p.externo_id||'').replace(/^ML-/,'');
+  return externo || p.codigo || ('#'+p.id);
+}
+
+/* ============================================================
+   v1.43 — FILTROS POR ESTADO Y POR REPARTIDOR
+   Dos listas desplegables al lado del buscador. Se suman a los chips de
+   arriba y al texto que escribas: los tres a la vez.
+   ============================================================ */
+/* El repartidor que "cuenta" para un pedido: si es compartido, el que la
+   oficina le planificó; si ya es nuestro, el que lo tiene asignado. */
+function repartidorEfectivo(p){
+  if(esCompartido(p)){ const pl = planDe(p.id); return pl ? pl.repartidor_id : null; }
+  return p.repartidor_id || null;
+}
+function cumpleEstado(p){
+  if(!fEstado) return true;
+  if(fEstado === 'compartido') return esCompartido(p);
+  return !esCompartido(p) && p.estado === fEstado;
+}
+function cumpleRepartidor(p){
+  if(!fRep) return true;
+  if(fRep === 'sin') return !repartidorEfectivo(p);
+  return repartidorEfectivo(p) === fRep;
+}
+window.limpiarFiltros = ()=>{ fEstado=''; fRep=''; pintarPedidos(); };
+
+function pintarFiltros(){
+  const selE = $('fEstado'), selR = $('fRep');
+  if(!selE || !selR) return;
+  // solo los estados que de verdad hay hoy en pantalla: menos ruido
+  const hayEstados = new Set(pedidos.filter(p=>!esCompartido(p)).map(p=>p.estado));
+  const hayCompartidos = pedidos.some(esCompartido);
+  selE.innerHTML = '<option value="">Estado: todos</option>'
+    + (hayCompartidos ? '<option value="compartido">🤝 Compartidos</option>' : '')
+    + Object.entries(EST).filter(([k])=>hayEstados.has(k))
+        .map(([k,v])=>`<option value="${k}">${v[1]} ${esc(v[0])}</option>`).join('');
+  selE.value = fEstado;
+
+  const reps = perfiles.filter(p=>p.activo && p.rol!=='empresa')
+    .sort((a,b)=>(a.nombre||'').localeCompare(b.nombre||''));
+  const cuenta = id => pedidos.filter(p=>repartidorEfectivo(p)===id).length;
+  const sinNadie = pedidos.filter(p=>!repartidorEfectivo(p)).length;
+  selR.innerHTML = '<option value="">Repartidor: todos</option>'
+    + `<option value="sin">— Sin repartidor (${sinNadie}) —</option>`
+    + reps.map(r=>`<option value="${r.id}">${esc(r.nombre)} (${cuenta(r.id)})</option>`).join('');
+  selR.value = fRep;
+
+  $('fLimpiar').style.display = (fEstado || fRep) ? '' : 'none';
+  // se resalta lo que está filtrando, para que no quede un filtro puesto sin querer
+  for(const s of [selE, selR]){
+    s.style.borderColor = s.value ? 'var(--brand)' : '';
+    s.style.fontWeight  = s.value ? '700' : '';
+  }
+}
+
 function pintarPedidos(){
   pintarChips();
+  pintarFiltros();
   const hoy = hoyStr(); const q = busq.toLowerCase();
   const lista = pedidos.filter(p=>{
     const f = filtro==='activos' ? !FIN.includes(p.estado)
@@ -2316,14 +2457,17 @@ function pintarPedidos(){
       : filtro==='anteriores' ? (p.fecha_pedido < hoy && !FIN.includes(p.estado) && p.repartidor_id)
       : filtro.startsWith('dia:') ? p.fecha_pedido===filtro.slice(4)
       : true;
-    const m = !q || [p.codigo,p.externo_id||'',p.cliente_nombre,p.direccion,p.comuna,clienteDe(p.cliente_id)||''].join(' ').toLowerCase().includes(q);
-    return f && m;
+    // el buscador mira el n° de envío, el n° de pedido de la tienda y el
+    // código interno, aunque el código ya no tenga columna propia
+    const m = !q || [numeroDeEnvioTxt(p),p.envio_id||'',p.codigo||'',p.externo_id||'',
+                     p.cliente_nombre,p.direccion,p.comuna,clienteDe(p.cliente_id)||'']
+                    .join(' ').toLowerCase().includes(q);
+    return f && m && cumpleEstado(p) && cumpleRepartidor(p);
   });
   $('tbodyPed').innerHTML = lista.length? lista.map(p=>`
     <tr onclick="verDetalle(${p.id})">
       <td onclick="event.stopPropagation()"><input type="checkbox" ${seleccion.has(p.id)?'checked':''} onchange="alternarSeleccion(${p.id}, this.checked)"></td>
-      <td class="cod">${esc(p.codigo||'#'+p.id)}${p.origen==='jumpseller'?' <span style="color:#1baf7a" title="Automático desde Jumpseller">⚡</span>':''}${p.origen==='mercadolibre'?' <span style="color:#3483fa;font-weight:800" title="Automático desde MercadoLibre Flex">Ⓜ</span>':''}</td>
-      <td class="cod">${p.externo_id?'#'+esc(p.externo_id):'—'}</td>
+      <td class="cod">${numeroDeEnvio(p)}</td>
       <td><b>${esc(p.cliente_nombre)}</b></td>
       <td>${p.cliente_telefono? `<a href="tel:${esc(p.cliente_telefono)}" onclick="event.stopPropagation()" style="color:inherit;text-decoration:none">${esc(p.cliente_telefono)}</a>` : '<span class="cod">—</span>'}</td>
       <td>${esc(p.direccion)}</td>
@@ -2341,7 +2485,7 @@ function pintarPedidos(){
       <td><a class="btn btn-ghost" style="padding:4px 10px;text-decoration:none" target="_blank" title="Ver dirección en Google Maps"
         onclick="event.stopPropagation()"
         href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent((p.direccion||'')+(p.comuna?', '+p.comuna:''))}">🗺️</a></td>
-    </tr>`).join('') : '<tr><td colspan="12" class="empty">No hay pedidos con este filtro.</td></tr>';
+    </tr>`).join('') : '<tr><td colspan="11" class="empty">No hay pedidos con este filtro.</td></tr>';
   ultimaListaFiltrada = lista.map(p=>p.id);
   pintarBarraMasiva();
 }
@@ -2630,22 +2774,38 @@ window.pedirClienteDesdeFicha = async (id)=>{
 async function asignarRepartidorA(ids, rep){
   const mios        = ids.filter(id => { const p = pedidos.find(x=>x.id===id); return p && !esCompartido(p); });
   const compartidos = ids.filter(id => { const p = pedidos.find(x=>x.id===id); return p &&  esCompartido(p); });
-  let n = 0, errores = [];
+  let n = 0, errores = [], noEscritos = [];
 
   if(mios.length){
-    const { error } = await sb.from('pedidos')
+    /* 🐛 v1.43 — antes se sumaba `mios.length`, o sea lo que se PIDIÓ, no lo
+       que la base realmente escribió. Si alguna fila no pasaba (por permisos,
+       o porque se entregó mientras tanto) el panel igual decía "asignados 86"
+       y aparecían menos. Ahora `.select('id')` devuelve las filas escritas y
+       contamos esas. */
+    const { data, error } = await sb.from('pedidos')
       .update({ repartidor_id: rep, estado: 'asignado' })
       .in('id', mios)
-      .not('estado','in','("entregado","cancelado")');
-    if(error) errores.push(error.message); else n += mios.length;
+      .not('estado','in','("entregado","cancelado")')
+      .select('id');
+    if(error) errores.push(error.message);
+    else {
+      const escritos = (data||[]).length;
+      n += escritos;
+      if(escritos < mios.length){
+        noEscritos.push(...mios.filter(id => !(data||[]).some(x=>x.id===id)));
+      }
+    }
   }
+  const asignados = n;
+  let previstos = 0;
   if(compartidos.length){
     const { data, error } = await sb.rpc('planificar_pedidos', { p_ids: compartidos, p_repartidor: rep || null });
     if(error) errores.push(/planificar_pedidos/.test(error.message)
       ? 'Falta correr migracion-plan-y-carga.sql en Supabase.' : error.message);
-    else n += (data?.planificados || 0);
+    else { previstos = (data?.planificados || 0); n += previstos; }
   }
-  return { n, compartidos: compartidos.length, errores };
+  return { n, asignados, previstos, compartidos: compartidos.length,
+           errores, noEscritos, pedidos: ids.length };
 }
 
 /* ---------- SELECCIÓN Y ACCIONES MASIVAS ---------- */
@@ -2980,6 +3140,8 @@ $('eGuardar').onclick = async ()=>{
 
 /* búsqueda (los chips de filtro se generan dinámicamente en pintarChips) */
 $('buscar').oninput = e=>{ busq = e.target.value; pintarPedidos(); };
+$('fEstado').onchange = e=>{ fEstado = e.target.value; pintarPedidos(); };
+$('fRep').onchange    = e=>{ fRep    = e.target.value; pintarPedidos(); };
 $('poolBuscar').oninput = e=>{ poolBusq = e.target.value; pintarPool(); };
 
 /* ============================================================
