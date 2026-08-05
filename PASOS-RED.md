@@ -1,6 +1,6 @@
 # TODO LO QUE HAY QUE HACER — en orden
 
-Panel v1.47 · Maestro v1.2 · APK v2.9.0
+Panel v1.48 · Maestro v1.2 · APK v2.9.0
 Hacelo de arriba abajo, sin saltear. Toma unos 20 minutos.
 
 ---
@@ -40,14 +40,14 @@ la raíz de `zas-reparto\` (pisando lo que haya):
 
 | Archivo que te mandé | Dónde va |
 |---|---|
-| `index.html` | raíz — **es el panel v1.47 ya renombrado** |
+| `index.html` | raíz — **es el panel v1.48 ya renombrado** |
 | `panel-maestro.html` | raíz |
 | `seguimiento.html` | raíz |
 
 ```
 git add index.html panel-maestro.html seguimiento.html panel/ supabase/ test-*.mjs PASOS-RED.md
 git add ZAS-Reparto-v2.9.0-moderno.apk ZAS-Reparto-v2.9.0-antiguo.apk
-git commit -m "v1.47 rutas más cortas y sectores que no se cruzan"
+git commit -m "v1.48 el mapa solo con los pedidos del día"
 git push
 ```
 
@@ -255,6 +255,25 @@ que no las respeta, lo más probable es que **no estén puestas**. Se cargan en
 **Repartidores → Editar → «Comunas de preferencia»**, separadas por coma y en
 orden de prioridad. Ahora la ventana de «🤖 Repartir auto» te dice de entrada
 cuántos repartidores las tienen puestas, así no queda la duda.
+
+### El mapa, solo con los pedidos del día (v1.48)
+
+El desplegable decía **«Sin asignar (648)»** y en el mapa aparecían muchos menos:
+el conteo sumaba *todos* los pendientes de la base, pero el mapa ya dibujaba solo
+los del día. Dos filtros distintos para la misma cosa. Ahora usan exactamente el
+mismo, y ese filtro es una ventana clara:
+
+> **Entran al mapa los pedidos de hoy, y los de ayer que hayan entrado después
+> de las 12:00.** Lo de antes ya está atrasado.
+
+Es el ritmo cuando el corte es al mediodía: lo que llega ayer por la tarde sale
+hoy. Un pedido sin asignar de la semana pasada no es una parada de la ruta de
+hoy — metido en el mapa solo ensucia la vista y estira los sectores.
+
+Lo atrasado **no se esconde**: arriba del mapa aparece una franja
+«⚠️ N pedidos sin asignar quedaron atrasados (el más viejo es del …)» con un
+botón **Ver cuáles son** que te lleva a Pedidos ya filtrado por «Anteriores» y
+«Sin repartidor».
 
 ---
 

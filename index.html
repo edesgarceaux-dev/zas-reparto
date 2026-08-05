@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ZAS Reparto — Panel de Control</title>
-<!-- panel v1.47 -->
+<!-- panel v1.48 -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -295,6 +295,10 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     </section>
     <!-- Mapa -->
     <section id="t-mapa" style="display:none">
+      <div id="mapaAtrasados" style="display:none;align-items:center;gap:10px;background:#FFF8E6;border:1px solid #F0E0B0;color:#8a6100;border-radius:10px;padding:9px 14px;margin-bottom:10px;font-size:13px">
+        <span id="mapaAtrasadosTxt" style="flex:1"></span>
+        <button class="btn btn-ghost" style="padding:4px 12px;font-size:12px;color:#8a6100;border-color:#e0cf9a" onclick="verAtrasados()">Ver cuáles son</button>
+      </div>
       <div class="bar">
         <select id="rutaRep" style="width:auto;min-width:200px" onchange="dibujarRuta()"></select>
         <select id="selPartida" style="width:auto;min-width:180px" onchange="elegirPartida()"></select>
@@ -4058,21 +4062,78 @@ const ordenEfectivo = p => {
   return p.ruta_orden ?? null;
 };
 
+/* ============================================================
+   v1.48 — QUÉ PEDIDOS ENTRAN AL MAPA
+
+   El mapa es para armar la ruta de HOY. Un pedido sin asignar de la
+   semana pasada no es una parada: es un problema a resolver aparte, y
+   metido en el mapa solo ensucia la vista y estira las rutas.
+
+   La ventana es: **desde ayer al mediodía**. Los pedidos que entraron
+   ayer pasado las 12:00 salen hoy —ese es el ritmo cuando el corte es a
+   las 12— y lo de antes ya está atrasado.
+
+   Los atrasados no se esconden: se cuentan y se avisan arriba del mapa.
+   ============================================================ */
+function desdeCuandoCuenta(){
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  d.setHours(12, 0, 0, 0);
+  return d;
+}
+/* Un pedido «de hoy» para el mapa. Se mira la fecha de despacho, y si el
+   pedido es de ayer se exige además que haya entrado después del mediodía. */
+function entraAlMapa(p){
+  const hoy = hoyDia();
+  if(!p.fecha_pedido) return false;
+  if(p.fecha_pedido > hoy) return true;         // programado para más adelante
+  if(p.fecha_pedido === hoy) return true;
+  const corte = desdeCuandoCuenta();
+  const ayer = new Date(corte); ayer.setHours(0,0,0,0);
+  if(p.fecha_pedido !== ayer.toLocaleDateString('en-CA')) return false;
+  return p.creado_en ? new Date(p.creado_en) >= corte : false;
+}
+const sinAsignarDelMapa = () => pedidos.filter(p =>
+  p.estado === 'pendiente' && !repartidorEfectivo(p) && entraAlMapa(p));
+const sinAsignarAtrasados = () => pedidos.filter(p =>
+  p.estado === 'pendiente' && !repartidorEfectivo(p) && !entraAlMapa(p));
+
 function poblarSelectorRuta(){
   const sel = $('rutaRep'); const valor = sel.value;
   const conteo = id => pedidos.filter(p=>repartidorEfectivo(p)===id && !FIN.includes(p.estado)).length;
-  const sinNadie = pedidos.filter(p=>p.estado==='pendiente' && !repartidorEfectivo(p)).length;
+  /* 🐛 v1.48 — el conteo contaba TODOS los pendientes de la base, pero el
+     mapa dibujaba solo los de hoy: decía «Sin asignar (648)» y aparecían
+     40. Ahora los dos usan exactamente el mismo filtro. */
+  const sinNadie = sinAsignarDelMapa().length;
   sel.innerHTML = `<option value="">📦 Sin asignar (${sinNadie})</option>` +
     perfiles.filter(x=>x.activo && x.rol!=='empresa').map(r=>
       `<option value="${r.id}">🛵 ${esc(r.nombre)}${r.rol==='admin'?' (admin)':''} — ${conteo(r.id)} activos</option>`).join('');
   if(valor) sel.value = valor;
+
+  // el cartel de los atrasados
+  const atrasados = sinAsignarAtrasados();
+  const caja = $('mapaAtrasados');
+  if(caja){
+    caja.style.display = atrasados.length ? 'flex' : 'none';
+    if(atrasados.length){
+      const viejo = atrasados.reduce((m,p)=> (p.fecha_pedido < m ? p.fecha_pedido : m),
+                                     atrasados[0].fecha_pedido);
+      $('mapaAtrasadosTxt').innerHTML =
+        `⚠️ <b>${atrasados.length} pedidos sin asignar quedaron atrasados</b> ` +
+        `(el más viejo es del ${esc(viejo)}). No entran al mapa para no estirar las rutas de hoy.`;
+    }
+  }
 }
+window.verAtrasados = ()=>{
+  filtro = 'anteriores'; fEstado = ''; fRep = 'sin'; busq = '';
+  document.querySelector('nav button[data-t="pedidos"]')?.click();
+  pintarPedidos();
+};
 
 const fechaLocalDe = ts => ts ? new Date(ts).toLocaleDateString('en-CA') : null;
 function pedidosDeRuta(){
   const rep = $('rutaRep').value;
-  if(!rep) return pedidos.filter(p=>p.estado==='pendiente' && !repartidorEfectivo(p)
-                                 && p.fecha_pedido >= hoyDia());
+  if(!rep) return sinAsignarDelMapa();
   const hoy = hoyDia();
   // activos + terminados HOY (por fecha real de término, no del pedido): se quedan en el mapa con su color
   return pedidos.filter(p=>repartidorEfectivo(p)===rep &&

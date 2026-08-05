@@ -165,11 +165,72 @@ const r = await page.evaluate(async () => {
   ok('7. sin repartidor elegido avisa en vez de perder el trabajo',
      !window.__rpcs.length && /Eleg/.test(window.__toast || ''), window.__toast);
 
-  // ---------- 8. sin la red instalada, todo como antes ----------
+  // ============================================================
+  // 8. LA VENTANA DEL MAPA: hoy + lo de ayer después de las 12:00
+  // ============================================================
+  const iso = d => d.toLocaleDateString('en-CA');
+  const AYER = (() => { const d = new Date(); d.setDate(d.getDate()-1); return iso(d); })();
+  const ANTEAYER = (() => { const d = new Date(); d.setDate(d.getDate()-2); return iso(d); })();
+  const ayerAlas = h => { const d = new Date(); d.setDate(d.getDate()-1);
+                          d.setHours(h,0,0,0); return d.toISOString(); };
+
+  const nuevo = (id, extra) => ({
+    id, codigo:'ZAS-'+id, cliente_nombre:'P'+id, direccion:'Calle '+id,
+    comuna:'Maipú', cliente_id:1, estado:'pendiente',
+    empresa_reparto_id:1, repartidor_id:null, ruta_orden:null,
+    lat:-33.5, lng:-70.7, ...extra });
+
+  window.__P2 = [
+    nuevo(101, { fecha_pedido: HOY,       creado_en: new Date().toISOString() }),
+    nuevo(102, { fecha_pedido: AYER,      creado_en: ayerAlas(18) }),  // ayer 18:00 → entra
+    nuevo(103, { fecha_pedido: AYER,      creado_en: ayerAlas(12) }),  // justo a las 12 → entra
+    nuevo(104, { fecha_pedido: AYER,      creado_en: ayerAlas(9)  }),  // ayer 9:00 → atrasado
+    nuevo(105, { fecha_pedido: ANTEAYER,  creado_en: ayerAlas(20) }),  // anteayer → atrasado
+    nuevo(106, { fecha_pedido: null,      creado_en: new Date().toISOString() }), // sin fecha
+    // uno de ayer temprano PERO ya asignado: no cuenta como atrasado
+    nuevo(107, { fecha_pedido: AYER, creado_en: ayerAlas(8), repartidor_id:'r2', estado:'asignado' }),
+  ];
+  eval('pedidos = window.__P2; misPlanes = [];');
+  eval('window.__mapa = sinAsignarDelMapa; window.__atras = sinAsignarAtrasados;');
+  window.__poblar();
+
+  const enMapa = window.__mapa().map(p=>p.id).sort();
+  ok('8. el de hoy entra al mapa', enMapa.includes(101), enMapa.join(','));
+  ok('8b. el de ayer a las 18:00 también', enMapa.includes(102), enMapa.join(','));
+  ok('8c. y el de ayer justo a las 12:00', enMapa.includes(103), enMapa.join(','));
+  ok('8d. el de ayer a las 9 de la mañana NO', !enMapa.includes(104), enMapa.join(','));
+  ok('8e. el de anteayer tampoco', !enMapa.includes(105), enMapa.join(','));
+  ok('8f. y uno sin fecha de despacho no se cuela', !enMapa.includes(106), enMapa.join(','));
+
+  const atras = window.__atras().map(p=>p.id).sort();
+  ok('9. los que quedaron afuera se cuentan como atrasados',
+     atras.join(',') === '104,105,106', atras.join(','));
+  ok('9b. un pedido de ayer temprano YA asignado no figura como atrasado',
+     !atras.includes(107), atras.join(','));
+
+  ok('10. el conteo del desplegable dice lo mismo que el mapa',
+     /Sin asignar \(3\)/.test([...$('rutaRep').options][0].textContent),
+     [...$('rutaRep').options][0].textContent);
+
+  ok('11. aparece el cartel de los atrasados',
+     $('mapaAtrasados').style.display === 'flex', $('mapaAtrasados').style.display);
+  ok('11b. y dice cuántos son y de cuándo es el más viejo',
+     /3 pedidos sin asignar quedaron atrasados/.test($('mapaAtrasadosTxt').textContent) &&
+     $('mapaAtrasadosTxt').textContent.includes(ANTEAYER),
+     $('mapaAtrasadosTxt').textContent);
+
+  eval('pedidos = window.__P2.filter(p=>p.id===101);');
+  window.__poblar();
+  ok('11c. sin atrasados, el cartel no aparece',
+     $('mapaAtrasados').style.display === 'none', $('mapaAtrasados').style.display);
+
+  eval('pedidos = window.__P; misPlanes = window.__PL;');
+
+  // ---------- 12. sin la red instalada, todo como antes ----------
   eval('HAY_POOL = false;');
   window.__poblar();
   const ops2 = [...$('rutaRep').options].map(o => o.textContent);
-  ok('8. sin la red, el mapa cuenta solo por repartidor_id',
+  ok('12. sin la red, el mapa cuenta solo por repartidor_id',
      /Hans Stuardo — 0 activos/.test(ops2.join(' | ')) &&
      /Martin Lagos — 2 activos/.test(ops2.join(' | ')), ops2.join(' | '));
   eval('HAY_POOL = true;');
