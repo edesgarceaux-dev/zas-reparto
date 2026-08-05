@@ -233,7 +233,7 @@ const r = await page.evaluate(async () => {
   window.hoyStr = () => HOY;                           // el test se rompía al pasar la medianoche
 
   const correrBoton = async (lista, cuposEscritos) => {
-    window.__escritos = []; window.__orden = [];
+    window.__escritos = []; window.__orden = []; window.__firmes = [];
     eval('pedidos = window.__lista; seleccion.clear();');
     window.__abrir();
     const cbs = [...document.querySelectorAll('#autoReps input[type="checkbox"]')];
@@ -314,22 +314,28 @@ const r = await page.evaluate(async () => {
   // ============================================================
   // 15. EL CASO REAL DE HOY: TODO COMPARTIDO
   //     La red está instalada y el cliente está en modo «abierto», así que
-  //     ningún pedido es de la empresa todavía.
+  //     ningún pedido es de la empresa todavía. Desde v1.51 asignar un
+  //     compartido lo TOMA: deja de estar en tierra de nadie.
   // ============================================================
-  window.__planes = [];
+  window.__planes = []; window.__firmes = [];
   eval(`
     HAY_POOL = true; miEmpresa = 1;
     sb.rpc = async (n, a) => {
       window.__rpcs = window.__rpcs || []; window.__rpcs.push({n, a});
+      const ids = (a && a.p_ids) || [];
+      const malos  = ids.filter(id =>  window.__malos && window.__malos.has(id));
+      const buenos = ids.filter(id => !(window.__malos && window.__malos.has(id)));
+      const rechazados = malos.map(id => ({id, motivo:'fuera de la zona de reparto'}));
+      if (n === 'tomar_y_asignar') {
+        if (window.__sinMigracion)
+          return { data:null, error:{message:'Could not find the function public.tomar_y_asignar'} };
+        buenos.forEach((id, i) => window.__firmes.push({pedido_id:id, orden:i+1, rep:a.p_repartidor}));
+        return { data:{ asignados: buenos.length, ids: buenos, rechazados }, error:null };
+      }
       if (window.__sinMigracion)
         return { data:null, error:{message:'Could not find the function public.planificar_pedidos'} };
-      const ids = (a && a.p_ids) || [];
-      const malos = ids.filter(id => window.__malos && window.__malos.has(id));
-      const buenos = ids.filter(id => !(window.__malos && window.__malos.has(id)));
       buenos.forEach((id, i) => window.__planes.push({pedido_id:id, orden:i+1, rep:a.p_repartidor}));
-      return { data:{ planificados: buenos.length,
-                      rechazados: malos.map(id => ({id, motivo:'fuera de la zona de reparto'})) },
-               error:null };
+      return { data:{ planificados: buenos.length, rechazados }, error:null };
     };
   `);
 
@@ -337,52 +343,52 @@ const r = await page.evaluate(async () => {
     const lista = hacerPedidos(120, 20).map(p => ({...p,
       fecha_pedido:HOY, empresa_reparto_id:null}));
     window.__lista = lista;
-    window.__planes = []; window.__rpcs = [];
+    window.__planes = []; window.__firmes = []; window.__rpcs = [];
     await correrBoton(lista, [60, 60]);
-    ok('15. con todo compartido, nada se escribe en la tabla de pedidos',
-       window.__escritos.length === 0, String(window.__escritos.length));
-    ok('15b. y los 120 quedan planificados', window.__planes.length === 120,
+    ok('15. los 120 compartidos pasan a ser de la empresa', window.__firmes.length === 120,
+       String(window.__firmes.length));
+    ok('15b. ninguno queda en el limbo del «previsto»', window.__planes.length === 0,
        String(window.__planes.length));
     ok('15c. 60 para cada repartidor',
-       new Set(window.__planes.map(p => p.rep)).size === 2 &&
-       window.__planes.filter(p => p.rep === window.__planes[0].rep).length === 60,
-       JSON.stringify(window.__planes.reduce((m,p)=>(m[p.rep]=(m[p.rep]||0)+1,m),{})));
-    ok('15d. el aviso dice que son "previstos"',
-       /previstos/.test(window.__ultimoToast || ''), window.__ultimoToast);
+       new Set(window.__firmes.map(p => p.rep)).size === 2 &&
+       window.__firmes.filter(p => p.rep === window.__firmes[0].rep).length === 60,
+       JSON.stringify(window.__firmes.reduce((m,p)=>(m[p.rep]=(m[p.rep]||0)+1,m),{})));
+    ok('15d. el aviso ya no habla de previstos',
+       !/previstos/.test(window.__ultimoToast || ''), window.__ultimoToast);
   }
 
-  // ---------- 16. el orden de ruta va al plan, no a los pedidos ----------
+  // ---------- 16. el orden de ruta vuelve a la tabla de pedidos ----------
   {
     const lista = hacerPedidos(20, 0).map(p => ({...p,
       fecha_pedido:HOY, empresa_reparto_id:null}));
     window.__lista = lista;
-    window.__planes = []; window.__orden = [];
+    window.__planes = []; window.__firmes = [];
     await correrBoton(lista, [20]);
-    ok('16. NO se intenta escribir ruta_orden en pedidos ajenos',
-       window.__orden.length === 0, String(window.__orden.length));
-    ok('16b. el orden va en el plan, del 1 al 20',
-       window.__planes.map(p => p.orden).join(',') ===
+    ok('16. la base recibe el orden de ruta al asignar, del 1 al 20',
+       window.__firmes.map(p => p.orden).join(',') ===
          Array.from({length:20}, (_, i) => i + 1).join(','),
-       window.__planes.map(p => p.orden).join(','));
-    ok('16c. y ese orden es el de la ruta, no el de la tabla',
-       window.__planes.map(p => p.pedido_id).join(',') !==
+       window.__firmes.map(p => p.orden).join(','));
+    ok('16b. y además queda escrito en `pedidos.ruta_orden`',
+       window.__orden.length === 20, String(window.__orden.length));
+    ok('16c. ese orden es el de la ruta, no el de la tabla',
+       window.__firmes.map(p => p.pedido_id).join(',') !==
          lista.map(p => p.id).join(','),
-       window.__planes.map(p => p.pedido_id).slice(0, 6).join(','));
+       window.__firmes.map(p => p.pedido_id).slice(0, 6).join(','));
   }
 
-  // ---------- 17. mezcla: unos míos y otros compartidos ----------
+  // ---------- 17. mezcla: unos ya míos y otros compartidos ----------
   {
     const lista = hacerPedidos(40, 0).map((p, i) => ({...p,
       fecha_pedido:HOY, empresa_reparto_id: i < 20 ? 1 : null}));
     window.__lista = lista;
-    window.__planes = []; window.__escritos = []; window.__orden = [];
+    window.__planes = []; window.__firmes = []; window.__escritos = []; window.__orden = [];
     await correrBoton(lista, [40]);
-    ok('17. los míos se asignan de verdad', window.__escritos.length === 20,
+    ok('17. los que ya eran míos se asignan derecho', window.__escritos.length === 20,
        String(window.__escritos.length));
-    ok('17b. y los compartidos quedan previstos', window.__planes.length === 20,
-       String(window.__planes.length));
-    ok('17c. el orden de ruta solo se escribe en los míos',
-       window.__orden.length === 20, String(window.__orden.length));
+    ok('17b. y los compartidos pasan a serlo en el acto', window.__firmes.length === 20,
+       String(window.__firmes.length));
+    ok('17c. el orden de ruta se escribe para los 40, no para la mitad',
+       window.__orden.length === 40, String(window.__orden.length));
   }
 
   // ---------- 18. la base rechaza algunos: se explica el motivo ----------
@@ -391,7 +397,7 @@ const r = await page.evaluate(async () => {
       fecha_pedido:HOY, empresa_reparto_id:null}));
     window.__lista = lista;
     window.__malos = new Set(lista.slice(0, 7).map(p => p.id));
-    window.__planes = [];
+    window.__planes = []; window.__firmes = [];
     await correrBoton(lista, [30]);
     window.__malos = null;
     ok('18. avisa cuántos no entraron', /7 no se pudieron asignar/.test(window.__ultimoToast || ''),
@@ -406,10 +412,14 @@ const r = await page.evaluate(async () => {
       fecha_pedido:HOY, empresa_reparto_id:null}));
     window.__lista = lista;
     window.__sinMigracion = true;
+    window.__planes = []; window.__firmes = [];
     await correrBoton(lista, [10]);
     window.__sinMigracion = false;
     ok('19. si falta el SQL lo dice claro, no falla en silencio',
        /migracion-plan-y-carga/.test(window.__errUI || ''), window.__errUI);
+    ok('19b. y sin la función nueva no se pierde nada: cae en el camino viejo',
+       window.__rpcs.some(x => x.n === 'tomar_y_asignar'),
+       JSON.stringify((window.__rpcs||[]).map(x => x.n).slice(-4)));
   }
 
   return out;

@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ZAS Reparto — Panel de Control</title>
-<!-- panel v1.51 -->
+<!-- panel v1.52 -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -2995,14 +2995,52 @@ window.pedirClienteDesdeFicha = async (id)=>{
   await cargarTodo();
 };
 
-/* v1.40 — asignar un repartidor.
-   Un pedido COMPARTIDO todavía no es mío: si le escribiera el repartidor
-   encima, se lo pisaría a la otra empresa. Por eso va a plan_reparto, que
-   guarda una fila por empresa. Recién al escanearlo pasa a ser mío. */
+/* 🐛 v1.51 — ASIGNAR ES QUEDÁRSELO.
+   Antes de la red, asignar era una sola cosa: escribirle el repartidor al
+   pedido. Con la red apareció el pedido COMPARTIDO, que todavía no es de
+   nadie, y a ese no se le puede escribir encima sin pisarle el pedido a la
+   otra empresa. La solución de entonces fue guardar una INTENCIÓN aparte, en
+   `plan_reparto`: el famoso «previsto».
+   Pero entre «asignado» y «escaneado» pasan horas, y en el medio el pedido
+   vive partido en dos tablas: el repartidor en una, el orden de ruta en la
+   otra. De ahí salieron el mapa vacío, «0 activos», la ruta desordenada y el
+   «previsto» que no se iba.
+   Ahora, cuando elegís repartidor, el pedido se toma Y se asigna de una:
+   queda entero en `pedidos`, como toda la vida. `planificar_pedidos` queda
+   de respaldo por si la base todavía no tiene la función nueva. */
 async function asignarRepartidorA(ids, rep){
   const mios        = ids.filter(id => { const p = pedidoPorId(id); return p && !esCompartido(p); });
-  const compartidos = ids.filter(id => { const p = pedidoPorId(id); return p &&  esCompartido(p); });
+  let compartidos   = ids.filter(id => { const p = pedidoPorId(id); return p &&  esCompartido(p); });
   let n = 0, errores = [], noEscritos = [];
+  let enFirme = 0, rechazados = [];
+
+  /* Primero los compartidos, EN FIRME. Los ids van en orden de ruta, así que
+     la base guarda la parada en `pedidos.ruta_orden` de una vez. */
+  if(compartidos.length && rep){
+    const { data, error } = await sb.rpc('tomar_y_asignar',
+      { p_ids: compartidos, p_repartidor: rep });
+    if(error){
+      // base sin la migración nueva: se sigue como antes, con «previsto»
+      if(!/tomar_y_asignar|does not exist|schema cache/i.test(error.message)) errores.push(error.message);
+    } else {
+      const logrados = (data?.ids || []).map(Number);
+      enFirme = logrados.length;
+      n += enFirme;
+      /* los rechazos de acá son provisorios: lo que no se pudo tomar se
+         reintenta abajo como «previsto», y ahí sale el motivo definitivo.
+         Contarlos dos veces hacía que el aviso dijera 14 de 7. */
+      rechazados = (data?.rechazados || []);
+      /* Que dejen de ser «compartidos» acá mismo: así el orden de ruta que se
+         guarda a continuación los incluye, sin esperar a la recarga. */
+      for(const id of logrados){
+        const p = pedidoPorId(id);
+        if(p){ p.empresa_reparto_id = miEmpresa; p.repartidor_id = rep;
+               if(p.estado === 'pendiente') p.estado = 'asignado'; }
+      }
+      misPlanes = misPlanes.filter(pl => !logrados.includes(pl.pedido_id));
+      compartidos = compartidos.filter(id => !logrados.includes(id));
+    }
+  }
 
   if(mios.length){
     /* 🐛 v1.43 — antes se sumaba `mios.length`, o sea lo que se PIDIÓ, no lo
@@ -3025,22 +3063,20 @@ async function asignarRepartidorA(ids, rep){
     }
   }
   const asignados = n;
-  let previstos = 0, rechazados = [];
+  let previstos = 0;
+  /* Lo que quedó: o la base todavía no tiene `tomar_y_asignar`, o se
+     adelantó otra empresa. Ahí sí se planifica, como antes. */
   if(compartidos.length){
-    /* Los ids van EN ORDEN DE RUTA: la base guarda esa posición en
-       plan_reparto.orden, que es lo que después ordena la ruta del
-       repartidor. Un compartido no es nuestro todavía, así que su orden no
-       se puede escribir en la tabla `pedidos`. */
     const { data, error } = await sb.rpc('planificar_pedidos', { p_ids: compartidos, p_repartidor: rep || null });
     if(error) errores.push(/planificar_pedidos/.test(error.message)
       ? 'Falta correr migracion-plan-y-carga.sql en Supabase.' : error.message);
     else {
       previstos  = (data?.planificados || 0);
-      rechazados = data?.rechazados || [];
+      rechazados = (data?.rechazados || []);   // ← reemplazan, no se suman
       n += previstos;
     }
   }
-  return { n, asignados, previstos, rechazados, compartidos: compartidos.length,
+  return { n, asignados, enFirme, previstos, rechazados, compartidos: compartidos.length,
            mios, errores, noEscritos, pedidos: ids.length };
 }
 
@@ -3069,7 +3105,8 @@ $('masivaAsignar').onclick = async ()=>{
   const r = await asignarRepartidorA(ids, rep);
   if(r.errores.length){ toast('Error: '+r.errores[0]); return; }
   toast(`${r.n} pedidos asignados a ${nombreDe(rep)}` +
-        (r.compartidos ? ` · ${r.compartidos} todavía compartidos: son tuyos recién cuando los escanee` : ''));
+        (r.enFirme ? ` · ${r.enFirme} pasaron a ser tuyos en firme` : '') +
+        (r.compartidos ? ` · ${r.compartidos} quedaron previstos${motivosCortos(r.rechazados)}` : ''));
   limpiarSeleccion(); cargarTodo();
 };
 /* 🐛 v1.43 — QUITAR LA ASIGNACIÓN, LA CONTRACARA DE asignarRepartidorA().
@@ -3319,7 +3356,9 @@ window.asignar = async (id)=>{
   cerrar('mDet');
   toast(r.compartidos
     ? 'Previsto para '+nombreDe(rep)+' — será tuyo cuando lo escanee'
-    : 'Pedido asignado a '+nombreDe(rep));
+    : r.enFirme
+      ? 'Asignado a '+nombreDe(rep)+' — y ya es tuyo: ninguna otra empresa lo ve'
+      : 'Pedido asignado a '+nombreDe(rep));
   cargarTodo();
 };
 window.cambiarEstado = async (id, e)=>{
@@ -3888,7 +3927,26 @@ function pintarReglasDelCliente(){
     <div style="margin-top:4px">Modo: ${modo}.</div>
     ${filas || '<div style="color:var(--ink-2)">Todavía no puso reglas.</div>'}
     <div style="margin-top:6px;color:var(--ink-2)">Freno: hasta ${lim.tope} pedidos tomados sin repartidor y ${lim.plazo} min para asignarlos.</div>
+    ${avisoModoCompartido(cli, vs)}
     <div style="margin-top:6px;color:var(--ink-2)">Esto lo cambia el cliente desde su portal${soySuper?', o vos desde el panel maestro':''}.</div>`;
+}
+
+/* v1.51 — decirle en criollo qué le cuesta el modo abierto.
+   Un cliente en modo «abierto» con más de una empresa hace que TODOS sus
+   pedidos nazcan compartidos: hasta que alguien los asigna o los escanea,
+   no son de nadie. Se puede trabajar así, pero si en la práctica los
+   reparte siempre la misma empresa, conviene decirlo y sacarse el
+   intermedio de encima. */
+function avisoModoCompartido(cli, vs){
+  const activas = vs.filter(v => v.estado === 'activa' && v.activo !== false);
+  if(cli.modo_reparto !== 'abierto' || activas.length < 2) return '';
+  return `<div style="margin-top:8px;background:#FFF8EC;border:1px solid #F0D9A8;border-radius:8px;padding:8px 10px;color:#7a5200">
+    Con <b>modo abierto</b> y ${activas.length} empresas habilitadas, todos los pedidos de este
+    cliente <b>nacen compartidos</b>: no son de nadie hasta que alguien los asigna o los escanea.
+    Si en la práctica los reparte siempre la misma empresa, pedile que ponga
+    <b>«Por mis reglas»</b> y le dé <b>prioridad 1</b> a esa empresa con <i>cualquier comuna</i>:
+    los pedidos entran ya con dueño y el panel deja de tener el paso del medio.
+  </div>`;
 }
 
 window.habilitarEmpresa = async (empId, v)=>{

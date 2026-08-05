@@ -1,6 +1,6 @@
 # TODO LO QUE HAY QUE HACER — en orden
 
-Panel v1.51 · Maestro v1.2 · APK v2.9.1
+Panel v1.52 · Maestro v1.2 · APK v2.9.1
 Hacelo de arriba abajo, sin saltear. Toma unos 20 minutos.
 
 ---
@@ -21,6 +21,7 @@ Uno por uno. Todos son seguros de repetir. Están en la carpeta `supabase/`.
 | 7 | `migracion-permisos.sql` | quién entra al panel y quién a la app |
 | 8 | `migracion-archivo-fotos.sql` | respaldo descargable y limpieza de fotos viejas |
 | 9 | `migracion-comunas-alias.sql` | **«Santiago Centro» deja de quedar fuera de zona** |
+| 10 | `migracion-asignar-firme.sql` | **asignar un pedido pasa a ser quedárselo: se acaba el «previsto»** |
 
 **Qué mirar en cada una** (te devuelven una tabla al final):
 - En la **3**: `comunas_que_reparte` tiene que dar **52**. Abajo te lista las comunas que quedaron fuera de zona — si ves una de la RM mal escrita, la agregás después desde el maestro.
@@ -29,6 +30,7 @@ Uno por uno. Todos son seguros de repetir. Están en la carpeta `supabase/`.
 - En la **7**: la fila `repartidor` tiene que decir `entran_al_panel = 0`. Ahí es donde tus repartidores dejan de poder entrar a la página.
 - En la **8**: `tabla_creada` = 1 y `funciones_creadas` = 5.
 - En la **9**: la primera tabla tiene que dar `ok` en todas menos Rancagua y Valparaíso. **La segunda es la que queda en pantalla**: te lista las comunas de tus pedidos que el sistema todavía no reconoce. Si ves alguna que sí repartís, agregala en el maestro → Zona de cobertura.
+- En la **10**: `funcion_creada` = 1. `previstos_pendientes` es lo que todavía está en el limbo del «previsto»: baja solo a medida que vayas asignando desde el panel.
 
 **No corras** `migracion-pool-empresas.sql`: está anulada, el archivo es solo un cartel.
 
@@ -42,14 +44,14 @@ la raíz de `zas-reparto\` (pisando lo que haya):
 
 | Archivo que te mandé | Dónde va |
 |---|---|
-| `index.html` | raíz — **es el panel v1.51 ya renombrado** |
+| `index.html` | raíz — **es el panel v1.52 ya renombrado** |
 | `panel-maestro.html` | raíz |
 | `seguimiento.html` | raíz |
 
 ```
 git add index.html panel-maestro.html seguimiento.html panel/ supabase/ test-*.mjs PASOS-RED.md
 git add ZAS-Reparto-v2.9.1-moderno.apk ZAS-Reparto-v2.9.1-antiguo.apk
-git commit -m "v1.51 + APK 2.9.1: el contador de bodega cuenta bultos, no fecha de entrada"
+git commit -m "v1.52: asignar es quedárselo — se acaba el pedido partido en dos tablas"
 git push
 ```
 
@@ -95,7 +97,7 @@ afuera hasta que otro admin te lo prenda.
 ## 5. Probar que funciona
 
 1. Entrá al panel con tu cuenta. En **Pedidos** los que todavía no son de nadie salen marcados **🤝 compartido**.
-2. Seleccioná uno compartido y asignale un repartidor. Fijate que dice *"previsto"*: todavía no es tuyo.
+2. Seleccioná uno compartido y asignale un repartidor. Desde v1.52 **pasa a ser tuyo en ese mismo momento**: el aviso dice «ya es tuyo» y a la otra empresa le desaparece. Si te dice *«previsto»* es que ese no se pudo tomar — el aviso te explica por qué.
 3. Entrá con la cuenta de Rapiditos: el mismo pedido le aparece a ella también, y puede asignarle **su** repartidor sin pisar el tuyo.
 4. Que un repartidor escanee esa etiqueta con la app. El pedido pasa a su empresa, se va a **📦 Mi carga**, y desaparece de la otra.
 5. En el panel de la empresa que lo perdió aparece la franja **📣 «salió de tu ruta»** diciendo quién se lo llevó.
@@ -344,6 +346,43 @@ la APK v2.9.1.
 De paso: «Deshacer último» decía frenarse con los pedidos `en_ruta`, un estado
 que no existe. El estado se llama `en_camino`, así que ese freno nunca frenó
 nada. Ya está corregido.
+
+### Asignar es quedárselo (v1.52 · `migracion-asignar-firme.sql`)
+
+**Lo que se complicó al sumar otras empresas de reparto.** Antes, asignar era
+una sola cosa: le escribías el repartidor al pedido y listo. El repartidor lo
+veía en el teléfono, la ruta se ordenaba sola, el mapa lo dibujaba.
+
+Con la red apareció el **pedido compartido**: uno que todavía no es de nadie
+porque el cliente habilitó a más de una empresa. A ese no se le puede escribir
+el repartidor encima sin pisárselo a la otra empresa, así que el panel guardaba
+una *intención* en otra tabla — el famoso **«previsto»** — y el pedido recién
+pasaba a ser tuyo cuando alguien lo escaneaba en bodega.
+
+El problema es que entre «asignado» y «escaneado» pasan horas, y en el medio el
+pedido queda **partido en dos tablas**: el repartidor en una, el orden de ruta
+en la otra. De ahí salieron, uno atrás del otro, el mapa vacío, el «0 activos»,
+la ruta que se desordenaba y el «previsto» que no se iba al desasignar.
+
+**Ahora, cuando elegís repartidor, el pedido se toma Y se asigna de una.** Queda
+entero en `pedidos`, con su parada de ruta escrita donde el mapa la busca. Desde
+ese momento deja de ser un caso especial: mapa, ✨ Optimizar, app del repartidor
+y contadores funcionan igual que antes de que existiera la red. El «previsto»
+solo queda para lo que de verdad no se pudo tomar, y el aviso te dice por qué.
+
+Lo que **no** cambia: un pedido que las reglas del cliente le dieron a otra
+empresa sigue siendo intocable, uno fuera de la zona sigue rebotando, y si dos
+empresas asignan el mismo pedido en el mismo segundo se lo lleva una sola.
+
+### Y si querés sacarte el modo compartido de encima
+
+Si en la práctica los pedidos de un cliente los reparte **siempre la misma
+empresa**, no hay razón para que nazcan compartidos. En el portal de ese cliente
+→ **Mis empresas de reparto**, que ponga **«Por mis reglas»** y le dé
+**prioridad 1** a esa empresa con *cualquier comuna*. Los pedidos entran ya con
+dueño, no hay paso del medio, y el panel se comporta exactamente como antes de
+la red. El panel te lo sugiere solo: en la ficha del cliente, si está en modo
+abierto con dos o más empresas, aparece un cartel explicándolo.
 
 ---
 
