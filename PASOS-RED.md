@@ -1,6 +1,6 @@
 # TODO LO QUE HAY QUE HACER — en orden
 
-Panel v1.50 · Maestro v1.2 · APK v2.9.0
+Panel v1.51 · Maestro v1.2 · APK v2.9.1
 Hacelo de arriba abajo, sin saltear. Toma unos 20 minutos.
 
 ---
@@ -17,7 +17,7 @@ Uno por uno. Todos son seguros de repetir. Están en la carpeta `supabase/`.
 | 3 | `migracion-zona-cobertura.sql` | carga las 52 comunas de la RM |
 | 4 | `migracion-escaneo-reclama.sql` | el escaneo reclama el pedido |
 | 5 | `migracion-plan-y-carga.sql` | planificar en paralelo + «Mi carga» + avisos |
-| 6 | `migracion-asignar-por-qr.sql` | asignar repartidor escaneando, desde la app |
+| 6 | `migracion-asignar-por-qr.sql` | asignar repartidor escaneando, desde la app — **actualizado: arregla el contador de bodega** |
 | 7 | `migracion-permisos.sql` | quién entra al panel y quién a la app |
 | 8 | `migracion-archivo-fotos.sql` | respaldo descargable y limpieza de fotos viejas |
 | 9 | `migracion-comunas-alias.sql` | **«Santiago Centro» deja de quedar fuera de zona** |
@@ -25,7 +25,7 @@ Uno por uno. Todos son seguros de repetir. Están en la carpeta `supabase/`.
 **Qué mirar en cada una** (te devuelven una tabla al final):
 - En la **3**: `comunas_que_reparte` tiene que dar **52**. Abajo te lista las comunas que quedaron fuera de zona — si ves una de la RM mal escrita, la agregás después desde el maestro.
 - En la **5**: `clientes_por_reglas` + `clientes_modo_abierto` tiene que ser el total de tus clientes.
-- En la **6**: `permiso_creado` = 1 y `funciones_creadas` = 3. `cuentas_que_pueden_asignar` son tus admin, que lo reciben prendido.
+- En la **6**: `permiso_creado` = 1 y `funciones_creadas` = 3. `cuentas_que_pueden_asignar` son tus admin, que lo reciben prendido. ⚠️ **Si ya la habías corrido, corrila de nuevo**: acá va el arreglo del número que decía 14 cuando se habían escaneado 20.
 - En la **7**: la fila `repartidor` tiene que decir `entran_al_panel = 0`. Ahí es donde tus repartidores dejan de poder entrar a la página.
 - En la **8**: `tabla_creada` = 1 y `funciones_creadas` = 5.
 - En la **9**: la primera tabla tiene que dar `ok` en todas menos Rancagua y Valparaíso. **La segunda es la que queda en pantalla**: te lista las comunas de tus pedidos que el sistema todavía no reconoce. Si ves alguna que sí repartís, agregala en el maestro → Zona de cobertura.
@@ -42,14 +42,14 @@ la raíz de `zas-reparto\` (pisando lo que haya):
 
 | Archivo que te mandé | Dónde va |
 |---|---|
-| `index.html` | raíz — **es el panel v1.50 ya renombrado** |
+| `index.html` | raíz — **es el panel v1.51 ya renombrado** |
 | `panel-maestro.html` | raíz |
 | `seguimiento.html` | raíz |
 
 ```
 git add index.html panel-maestro.html seguimiento.html panel/ supabase/ test-*.mjs PASOS-RED.md
-git add ZAS-Reparto-v2.9.0-moderno.apk ZAS-Reparto-v2.9.0-antiguo.apk
-git commit -m "v1.50 Santiago Centro en zona + los escaneados vuelven al mapa"
+git add ZAS-Reparto-v2.9.1-moderno.apk ZAS-Reparto-v2.9.1-antiguo.apk
+git commit -m "v1.51 + APK 2.9.1: el contador de bodega cuenta bultos, no fecha de entrada"
 git push
 ```
 
@@ -59,7 +59,7 @@ Esperá ~1 minuto a que GitHub Pages reconstruya y entrá con **Ctrl+F5**.
 
 ## 3. Instalar la APK
 
-**`ZAS-Reparto-v2.9.0-moderno.apk`** en los teléfonos de los repartidores
+**`ZAS-Reparto-v2.9.1-moderno.apk`** en los teléfonos de los repartidores
 **y en el del que reparte la pega en bodega**.
 (La `-antiguo` es solo para teléfonos viejos de 32 bits.)
 
@@ -306,6 +306,44 @@ los puntos se borraban del mapa justo cuando el repartidor terminaba de cargar,
 que es cuando más falta hace la ruta. Ahora el mapa mira las dos listas: cuenta
 bien los activos de cada repartidor, dibuja los puntos de los bultos ya cargados
 y respeta su orden de ruta.
+
+### Una sola lista de pedidos (v1.51)
+
+**El caso**: el de bodega escanea 20 bultos, después les quita el repartidor, y
+los 20 quedan atrapados en «📦 Mi carga». No salían en **Pedidos**, «🤖 Repartir
+auto» no los veía, y los tiles del resumen no los contaban. Veinte bultos sobre
+la mesa y ninguna pantalla desde la cual moverlos.
+
+La causa: escanear un bulto lo mandaba a una lista aparte y lo sacaba de la
+principal. Estaba pensado para bodega, pero terminaba escondiendo pedidos.
+
+Ahora **«Pedidos» muestra todo lo que tu empresa puede mover** —escaneado o no—
+y los que ya están en bodega llevan un **📦** al lado del número. «📦 Mi carga»
+sigue estando, como atajo para el que carga, pero ya no esconde nada. Además:
+
+- Chip nuevo **«📦 Cargados sin repartidor (N)»**: es exactamente el montón que
+  antes quedaba huérfano. Aparece solo cuando hay alguno.
+- **«🤖 Repartir auto» ahora sí agarra los bultos ya escaneados.** Eran justo los
+  que están en la mano, listos para salir, y eran los únicos que no veía.
+- El desplegable de repartidor, los chips y los tiles del resumen cuentan todo:
+  «Sin repartidor» dejó de mostrar menos de lo que hay.
+
+### El número del chip de bodega decía 14 con 20 escaneados (APK v2.9.1)
+
+El contador al lado del nombre de cada repartidor contaba «pedidos que ENTRARON
+hoy al sistema». Los de MercadoLibre entran la tarde anterior, así que no se
+contaban: se escaneaban 20 bultos y el chip mostraba 14. La asignación siempre
+estuvo bien; el número estaba mal.
+
+Ahora cuenta **lo que el repartidor tiene encima sin terminar** —el mismo
+criterio que el «N activos» del panel y que la pantalla del propio repartidor—.
+Un entregado, cancelado o no entregado deja de pesar; uno en camino sigue
+contando. Hay que **volver a correr `migracion-asignar-por-qr.sql`** e instalar
+la APK v2.9.1.
+
+De paso: «Deshacer último» decía frenarse con los pedidos `en_ruta`, un estado
+que no existe. El estado se llama `en_camino`, así que ese freno nunca frenó
+nada. Ya está corregido.
 
 ---
 

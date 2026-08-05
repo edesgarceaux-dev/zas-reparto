@@ -49,8 +49,19 @@ update public.perfiles
 -- teléfonos). Así que la app pide esta función, que devuelve solo lo
 -- justo: nombre y id de los repartidores activos de SU empresa.
 -- ============================================================
+--
+-- 🐛 EL NÚMERO QUE MENTÍA
+-- Antes este contador decía «pedidos que ENTRARON hoy al sistema». Los de
+-- MercadoLibre entran la tarde anterior, así que el de bodega escaneaba 20
+-- bultos y el chip mostraba 14: los 6 que faltaban eran los de ayer. La
+-- asignación estaba bien; el número estaba mal.
+-- Ahora cuenta lo que el repartidor TIENE ENCIMA sin terminar, que es lo
+-- que él quiere saber, y es el mismo criterio que el «N activos» del panel.
+--
+drop function if exists public.repartidores_para_asignar();
+
 create or replace function public.repartidores_para_asignar()
-returns table (id uuid, nombre text, pedidos_hoy int)
+returns table (id uuid, nombre text, pedidos_activos int)
 language plpgsql security definer set search_path = public as $$
 declare
   v_emp bigint;
@@ -70,7 +81,7 @@ begin
            (select count(*)::int from public.pedidos q
              where q.repartidor_id = pf.id
                and q.empresa_reparto_id = v_emp
-               and q.creado_en >= (now() at time zone 'America/Santiago')::date)
+               and q.estado not in ('entregado','cancelado','no_entregado'))
       from public.perfiles pf
      where pf.empresa_reparto_id = v_emp
        and pf.activo
@@ -183,10 +194,11 @@ begin
            estado        = case when q.estado = 'pendiente' then 'asignado' else q.estado end
      where q.id = p.id;
 
+    -- lo que le queda encima sin terminar (ver la nota del punto 2)
     select count(*)::int into v_total from public.pedidos q
      where q.repartidor_id = coalesce(p_repartidor, p.repartidor_id)
        and q.empresa_reparto_id = v_emp
-       and q.creado_en >= (now() at time zone 'America/Santiago')::date;
+       and q.estado not in ('entregado','cancelado','no_entregado');
 
     return jsonb_build_object('ok', true, 'ya_era_mio', true,
       'pedido_id', p.id, 'codigo', p.codigo, 'comuna', p.comuna,
@@ -271,7 +283,7 @@ begin
   select count(*)::int into v_total from public.pedidos q
    where q.repartidor_id = p_repartidor
      and q.empresa_reparto_id = v_emp
-     and q.creado_en >= (now() at time zone 'America/Santiago')::date;
+     and q.estado not in ('entregado','cancelado','no_entregado');
 
   return jsonb_build_object('ok', true, 'ya_era_mio', false,
     'pedido_id', p.id, 'codigo', p.codigo, 'comuna', p.comuna,
@@ -311,7 +323,9 @@ begin
   if p.id is null then
     return jsonb_build_object('ok', false, 'motivo', 'Ese pedido ya no es de tu empresa.');
   end if;
-  if p.estado in ('entregado','cancelado','en_ruta') then
+  -- 🐛 decía 'en_ruta', que no es un estado que exista: el freno no frenaba
+  -- nada. El estado de verdad se llama 'en_camino'.
+  if p.estado in ('entregado','cancelado','en_camino') then
     return jsonb_build_object('ok', false,
       'motivo', 'Ese pedido ya está ' || p.estado || ': no se puede deshacer desde acá.');
   end if;

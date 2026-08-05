@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ZAS Reparto — Panel de Control</title>
-<!-- panel v1.50 -->
+<!-- panel v1.51 -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -220,7 +220,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
     <!-- Mi carga: los bultos que ya escanearon mis repartidores -->
     <section id="t-pool" style="display:none">
       <div class="bar">
-        <span style="color:var(--muted);font-size:13px">Los bultos que <b>tus repartidores ya escanearon</b>: son tuyos en firme y ninguna otra empresa los ve.</span>
+        <span style="color:var(--muted);font-size:13px">Los bultos que <b>tus repartidores ya escanearon</b>: son tuyos en firme y ninguna otra empresa los ve. Todos aparecen también en <b>Pedidos</b>, con un 📦 al lado del número.</span>
         <span class="sp"></span>
         <select id="poolComuna" style="width:auto;min-width:150px" onchange="poolFiltrarComuna(this.value)"><option value="">Todas las comunas</option></select>
         <input type="search" id="poolBuscar" placeholder="Buscar cliente, dirección, n° de envío…" style="max-width:220px">
@@ -1918,9 +1918,13 @@ if($('cqDeshacer')) $('cqDeshacer').onclick = async ()=>{
 let autoLista = [];
 window.abrirAutoRepartir = ()=>{
   const hoy = hoyStr();
+  /* 🐛 v1.51 — «Repartir auto» miraba solo `pedidos` y se saltaba los bultos
+     ya escaneados. Justo los que están en bodega, en la mano, listos para
+     salir, eran los únicos que el repartidor automático no veía. */
   autoLista = seleccion.size
-    ? pedidos.filter(p=>seleccion.has(p.id) && !FIN.includes(p.estado))
-    : pedidos.filter(p=>p.estado==='pendiente' && p.fecha_pedido>=hoy);
+    ? todosLosPedidos().filter(p=>seleccion.has(p.id) && !FIN.includes(p.estado))
+    : todosLosPedidos().filter(p=>p.estado==='pendiente' && p.fecha_pedido>=hoy
+                                  && !repartidorEfectivo(p));
   if(!autoLista.length){ toast('No hay pedidos para repartir — selecciona algunos en la tabla o revisa "Sin asignar"'); return; }
   const sinUbicar = autoLista.filter(p=>p.lat==null).length;
   $('autoInfo').innerHTML = (seleccion.size
@@ -2500,14 +2504,17 @@ function pintar(){
 
 function pintarTiles(){
   const hoy = hoyStr();
-  const deHoy = pedidos.filter(p=>p.fecha_pedido===hoy);
-  const activos = pedidos.filter(p=>!FIN.includes(p.estado));
+  // 🐛 v1.51 — los tiles contaban solo `pedidos` y dejaban afuera los bultos
+  // ya escaneados: el resumen mostraba menos de lo que había en la calle.
+  const base = todosLosPedidos();
+  const deHoy = base.filter(p=>p.fecha_pedido===hoy);
+  const activos = base.filter(p=>!FIN.includes(p.estado));
   const c = e => deHoy.filter(p=>p.estado===e).length;
   const tiles = [
     ['Pedidos hoy', deHoy.length, 'var(--ink)'],
     ['Activos ahora', activos.length, 'var(--st-aceptado)'],
-    ['Sin asignar', pedidos.filter(p=>p.estado==='pendiente').length, 'var(--st-pendiente)'],
-    ['En camino', pedidos.filter(p=>p.estado==='en_camino').length, 'var(--st-en_camino)'],
+    ['Sin asignar', base.filter(p=>p.estado==='pendiente').length, 'var(--st-pendiente)'],
+    ['En camino', base.filter(p=>p.estado==='en_camino').length, 'var(--st-en_camino)'],
     ['Entregados hoy', c('entregado'), 'var(--st-entregado)'],
     ['No entregados hoy', c('no_entregado'), 'var(--st-no_entregado)'],
   ];
@@ -2519,9 +2526,9 @@ function pintarRendimiento(){
   const hoy = hoyStr();
   // repartidores + admins que tengan pedidos asignados
   const reps = perfiles.filter(p=>p.rol==='repartidor' ||
-    (p.rol==='admin' && pedidos.some(x=>x.repartidor_id===p.id)));
+    (p.rol==='admin' && todosLosPedidos().some(x=>x.repartidor_id===p.id)));
   $('tbodyRep').innerHTML = reps.length? reps.map(r=>{
-    const suyos = pedidos.filter(p=>p.repartidor_id===r.id);
+    const suyos = todosLosPedidos().filter(p=>p.repartidor_id===r.id);
     const act = suyos.filter(p=>!FIN.includes(p.estado)).length;
     const ent = suyos.filter(p=>p.estado==='entregado' && p.fecha_pedido===hoy).length;
     const noe = suyos.filter(p=>p.estado==='no_entregado' && p.fecha_pedido===hoy).length;
@@ -2529,13 +2536,23 @@ function pintarRendimiento(){
   }).join('') : '<tr><td colspan="4" class="empty">Aún no hay repartidores.</td></tr>';
 }
 
+/* 🐛 v1.51 — UNA SOLA LISTA DE PEDIDOS
+   Antes «Pedidos» mostraba solo lo NO cargado y «📦 Mi carga» solo lo
+   cargado. Un bulto escaneado desaparecía de Pedidos para siempre: si
+   después le quitabas el repartidor quedaba dando vueltas en Mi carga,
+   sin asignar, invisible desde la pantalla donde se trabaja.
+   Ahora «Pedidos» muestra TODO lo que la empresa puede mover —cargado o
+   no— y los cargados llevan un 📦 al lado del número. «Mi carga» sigue
+   existiendo como atajo para bodega, pero ya no esconde nada. */
+const listaDeTrabajo = () => todosLosPedidos();
+
 /* chips dinámicos por día de despacho, con conteo en vivo */
 function pintarChips(){
   const cont = $('chipsFiltros'); if(!cont) return;
   const hoy = hoyStr();
   const conteoDia = {};
   let atrasados = 0;
-  for(const p of pedidos){
+  for(const p of listaDeTrabajo()){
     if(FIN.includes(p.estado)) continue;
     if(!p.fecha_pedido) continue;
     if(p.fecha_pedido < hoy){
@@ -2556,9 +2573,14 @@ function pintarChips(){
     return base.charAt(0).toUpperCase()+base.slice(1);
   };
   const fechas = Object.keys(conteoDia).sort().slice(0,7);
+  // los que ya se escanearon y todavía no tienen a quién llevárselos:
+  // este es el montón que antes quedaba escondido en «Mi carga»
+  const sueltos = listaDeTrabajo().filter(p =>
+    p.cargado_en && !FIN.includes(p.estado) && !repartidorEfectivo(p)).length;
   const chips = [
     {k:'activos', t:'Activos'},
     {k:'sin_asignar', t:'Sin asignar'},
+    ...(sueltos ? [{k:'cargados_sueltos', t:`📦 Cargados sin repartidor (${sueltos})`}] : []),
     ...(atrasados ? [{k:'anteriores', t:`⚠️ Atrasados (${atrasados})`}] : []),
     ...fechas.map(f=>({k:'dia:'+f, t:`${etiqueta(f)} (${conteoDia[f]})`})),
     {k:'todos', t:'Todos'},
@@ -2625,8 +2647,9 @@ function pintarFiltros(){
   const selE = $('fEstado'), selR = $('fRep');
   if(!selE || !selR) return;
   // solo los estados que de verdad hay hoy en pantalla: menos ruido
-  const hayEstados = new Set(pedidos.filter(p=>!esCompartido(p)).map(p=>p.estado));
-  const hayCompartidos = pedidos.some(esCompartido);
+  const base = listaDeTrabajo();
+  const hayEstados = new Set(base.filter(p=>!esCompartido(p)).map(p=>p.estado));
+  const hayCompartidos = base.some(esCompartido);
   selE.innerHTML = '<option value="">Estado: todos</option>'
     + (hayCompartidos ? '<option value="compartido">🤝 Compartidos</option>' : '')
     + Object.entries(EST).filter(([k])=>hayEstados.has(k))
@@ -2635,8 +2658,8 @@ function pintarFiltros(){
 
   const reps = perfiles.filter(p=>p.activo && p.rol!=='empresa')
     .sort((a,b)=>(a.nombre||'').localeCompare(b.nombre||''));
-  const cuenta = id => pedidos.filter(p=>repartidorEfectivo(p)===id).length;
-  const sinNadie = pedidos.filter(p=>!repartidorEfectivo(p)).length;
+  const cuenta = id => base.filter(p=>repartidorEfectivo(p)===id).length;
+  const sinNadie = base.filter(p=>!repartidorEfectivo(p)).length;
   selR.innerHTML = '<option value="">Repartidor: todos</option>'
     + `<option value="sin">— Sin repartidor (${sinNadie}) —</option>`
     + reps.map(r=>`<option value="${r.id}">${esc(r.nombre)} (${cuenta(r.id)})</option>`).join('');
@@ -2654,9 +2677,10 @@ function pintarPedidos(){
   pintarChips();
   pintarFiltros();
   const hoy = hoyStr(); const q = busq.toLowerCase();
-  const lista = pedidos.filter(p=>{
+  const lista = listaDeTrabajo().filter(p=>{
     const f = filtro==='activos' ? !FIN.includes(p.estado)
       : filtro==='sin_asignar' ? (p.estado==='pendiente' && p.fecha_pedido >= hoy)
+      : filtro==='cargados_sueltos' ? (p.cargado_en && !FIN.includes(p.estado) && !repartidorEfectivo(p))
       : filtro==='anteriores' ? (p.fecha_pedido < hoy && !FIN.includes(p.estado) && p.repartidor_id)
       : filtro.startsWith('dia:') ? p.fecha_pedido===filtro.slice(4)
       : true;
@@ -2670,7 +2694,8 @@ function pintarPedidos(){
   $('tbodyPed').innerHTML = lista.length? lista.map(p=>`
     <tr onclick="verDetalle(${p.id})">
       <td onclick="event.stopPropagation()"><input type="checkbox" ${seleccion.has(p.id)?'checked':''} onchange="alternarSeleccion(${p.id}, this.checked)"></td>
-      <td class="cod">${numeroDeEnvio(p)}</td>
+      <td class="cod">${numeroDeEnvio(p)}${p.cargado_en
+        ? ' <span title="Ya escaneado: está en bodega, es tuyo en firme">📦</span>' : ''}</td>
       <td><b>${esc(p.cliente_nombre)}</b></td>
       <td>${p.cliente_telefono? `<a href="tel:${esc(p.cliente_telefono)}" onclick="event.stopPropagation()" style="color:inherit;text-decoration:none">${esc(p.cliente_telefono)}</a>` : '<span class="cod">—</span>'}</td>
       <td>${esc(p.direccion)}</td>
