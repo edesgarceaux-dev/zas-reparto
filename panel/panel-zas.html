@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ZAS Reparto — Panel de Control</title>
-<!-- panel v1.49 -->
+<!-- panel v1.50 -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -4107,14 +4107,19 @@ function entraAlMapa(p){
   if(p.fecha_pedido !== ayer.toLocaleDateString('en-CA')) return false;
   return p.creado_en ? new Date(p.creado_en) >= corte : false;
 }
-const sinAsignarDelMapa = () => pedidos.filter(p =>
+/* 🐛 v1.50 — EL MAPA TIENE QUE MIRAR LAS DOS LISTAS.
+   Un bulto ya escaneado se va a «📦 Mi carga» (poolPedidos) y sale de
+   `pedidos`. El mapa solo miraba `pedidos`, así que en cuanto el
+   repartidor escaneaba su carga los puntos DESAPARECÍAN del mapa —
+   justo cuando más falta hace la ruta. `todosLosPedidos()` junta las dos. */
+const sinAsignarDelMapa = () => todosLosPedidos().filter(p =>
   p.estado === 'pendiente' && !repartidorEfectivo(p) && entraAlMapa(p));
-const sinAsignarAtrasados = () => pedidos.filter(p =>
+const sinAsignarAtrasados = () => todosLosPedidos().filter(p =>
   p.estado === 'pendiente' && !repartidorEfectivo(p) && !entraAlMapa(p));
 
 function poblarSelectorRuta(){
   const sel = $('rutaRep'); const valor = sel.value;
-  const conteo = id => pedidos.filter(p=>repartidorEfectivo(p)===id && !FIN.includes(p.estado)).length;
+  const conteo = id => todosLosPedidos().filter(p=>repartidorEfectivo(p)===id && !FIN.includes(p.estado)).length;
   /* 🐛 v1.48 — el conteo contaba TODOS los pendientes de la base, pero el
      mapa dibujaba solo los de hoy: decía «Sin asignar (648)» y aparecían
      40. Ahora los dos usan exactamente el mismo filtro. */
@@ -4157,7 +4162,7 @@ function pedidosDeRuta(){
   if(!rep) return sinAsignarDelMapa();
   const hoy = hoyDia();
   // activos + terminados HOY (por fecha real de término, no del pedido): se quedan en el mapa con su color
-  return pedidos.filter(p=>repartidorEfectivo(p)===rep &&
+  return todosLosPedidos().filter(p=>repartidorEfectivo(p)===rep &&
     (!FIN.includes(p.estado) ||
       (['entregado','no_entregado'].includes(p.estado) &&
         (fechaLocalDe(p.entregado_en)===hoy || fechaLocalDe(p.actualizado_en)===hoy || p.fecha_pedido===hoy))));

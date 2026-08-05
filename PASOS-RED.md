@@ -1,6 +1,6 @@
 # TODO LO QUE HAY QUE HACER — en orden
 
-Panel v1.49 · Maestro v1.2 · APK v2.9.0
+Panel v1.50 · Maestro v1.2 · APK v2.9.0
 Hacelo de arriba abajo, sin saltear. Toma unos 20 minutos.
 
 ---
@@ -20,6 +20,7 @@ Uno por uno. Todos son seguros de repetir. Están en la carpeta `supabase/`.
 | 6 | `migracion-asignar-por-qr.sql` | asignar repartidor escaneando, desde la app |
 | 7 | `migracion-permisos.sql` | quién entra al panel y quién a la app |
 | 8 | `migracion-archivo-fotos.sql` | respaldo descargable y limpieza de fotos viejas |
+| 9 | `migracion-comunas-alias.sql` | **«Santiago Centro» deja de quedar fuera de zona** |
 
 **Qué mirar en cada una** (te devuelven una tabla al final):
 - En la **3**: `comunas_que_reparte` tiene que dar **52**. Abajo te lista las comunas que quedaron fuera de zona — si ves una de la RM mal escrita, la agregás después desde el maestro.
@@ -27,6 +28,7 @@ Uno por uno. Todos son seguros de repetir. Están en la carpeta `supabase/`.
 - En la **6**: `permiso_creado` = 1 y `funciones_creadas` = 3. `cuentas_que_pueden_asignar` son tus admin, que lo reciben prendido.
 - En la **7**: la fila `repartidor` tiene que decir `entran_al_panel = 0`. Ahí es donde tus repartidores dejan de poder entrar a la página.
 - En la **8**: `tabla_creada` = 1 y `funciones_creadas` = 5.
+- En la **9**: la primera tabla tiene que dar `ok` en todas menos Rancagua y Valparaíso. **La segunda es la que queda en pantalla**: te lista las comunas de tus pedidos que el sistema todavía no reconoce. Si ves alguna que sí repartís, agregala en el maestro → Zona de cobertura.
 
 **No corras** `migracion-pool-empresas.sql`: está anulada, el archivo es solo un cartel.
 
@@ -40,14 +42,14 @@ la raíz de `zas-reparto\` (pisando lo que haya):
 
 | Archivo que te mandé | Dónde va |
 |---|---|
-| `index.html` | raíz — **es el panel v1.49 ya renombrado** |
+| `index.html` | raíz — **es el panel v1.50 ya renombrado** |
 | `panel-maestro.html` | raíz |
 | `seguimiento.html` | raíz |
 
 ```
 git add index.html panel-maestro.html seguimiento.html panel/ supabase/ test-*.mjs PASOS-RED.md
 git add ZAS-Reparto-v2.9.0-moderno.apk ZAS-Reparto-v2.9.0-antiguo.apk
-git commit -m "v1.49 el mapa respeta la hora de corte de cada cliente"
+git commit -m "v1.50 Santiago Centro en zona + los escaneados vuelven al mapa"
 git push
 ```
 
@@ -280,6 +282,30 @@ Lo atrasado **no se esconde**: arriba del mapa aparece una franja
 botón **Ver cuáles son** que te lleva a Pedidos ya filtrado por «Anteriores» y
 «Sin repartidor». El cartel también dice qué horas de corte se aplicaron, así se
 entiende el criterio de un vistazo.
+
+### Dos arreglos de la calle (v1.50)
+
+**«Va a Santiago Centro, fuera de la zona de reparto».** El repartidor tenía el
+bulto en la mano y la dirección a diez cuadras, pero la app lo rebotaba. La lista
+de cobertura dice «Santiago» y MercadoLibre manda «Santiago Centro»: la
+comparación era exacta y no calzaban. Ahora el nombre se limpia antes de
+comparar —le saca «Comuna de», la región, el país— y hay una tabla de sinónimos
+para lo que se ve en la calle: `Santiago Centro`, `Comuna de Maipú`,
+`Ñuñoa, Región Metropolitana`, `Estacion Central` sin tilde, `PAC`, `Til Til`,
+`San Bernando` mal escrito. Lo que está de verdad afuera —Rancagua, Valparaíso—
+sigue rebotando, y «Maipo» no se cuela como «Maipú».
+
+Correr `migracion-comunas-alias.sql` **recalcula la zona de todos los pedidos ya
+guardados**, así los que quedaron mal marcados se arreglan solos. Si te aparece
+otra comuna mal escrita, se agrega a la lista de sinónimos del punto 1 de ese
+archivo y se vuelve a correr.
+
+**Los pedidos escaneados desaparecían del mapa.** Al escanear, el bulto se va a
+«📦 Mi carga» —que es otra lista— y el mapa solo miraba la de Pedidos. O sea que
+los puntos se borraban del mapa justo cuando el repartidor terminaba de cargar,
+que es cuando más falta hace la ruta. Ahora el mapa mira las dos listas: cuenta
+bien los activos de cada repartidor, dibuja los puntos de los bultos ya cargados
+y respeta su orden de ruta.
 
 ---
 

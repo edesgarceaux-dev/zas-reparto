@@ -294,11 +294,62 @@ const r = await page.evaluate(async () => {
 
   eval('pedidos = window.__P; misPlanes = window.__PL; clientes = [{id:1,nombre:"DISTRIBUIDORA PEPITO",lat:-33.45,lng:-70.66}];');
 
-  // ---------- 16. sin la red instalada, todo como antes ----------
+  // ============================================================
+  // 16. LOS BULTOS YA ESCANEADOS TIENEN QUE SEGUIR EN EL MAPA
+  //     Al escanear, el pedido se va a «Mi carga» (poolPedidos) y sale
+  //     de `pedidos`. El mapa igual los tiene que ver.
+  // ============================================================
+  eval(`
+    clientes = [{id:1,nombre:'DISTRIBUIDORA PEPITO',hora_corte:'12:00:00',lat:-33.45,lng:-70.66}];
+    pedidos = [
+      { id:301, codigo:'ZAS-301', cliente_nombre:'Sin cargar', direccion:'C 1', comuna:'Maipú',
+        cliente_id:1, estado:'asignado', empresa_reparto_id:1, repartidor_id:'r1',
+        ruta_orden:2, lat:-33.51, lng:-70.75, fecha_pedido:window.__HOY, cargado_en:null },
+    ];
+    poolPedidos = [
+      { id:302, codigo:'ZAS-302', cliente_nombre:'Ya escaneado', direccion:'C 2', comuna:'Maipú',
+        cliente_id:1, estado:'asignado', empresa_reparto_id:1, repartidor_id:'r1',
+        ruta_orden:1, lat:-33.52, lng:-70.76, fecha_pedido:window.__HOY,
+        cargado_en:'2026-08-05T10:00:00Z' },
+      { id:303, codigo:'ZAS-303', cliente_nombre:'Cargado sin dueño', direccion:'C 3', comuna:'Ñuñoa',
+        cliente_id:1, estado:'pendiente', empresa_reparto_id:1, repartidor_id:null,
+        ruta_orden:null, lat:-33.45, lng:-70.60, fecha_pedido:window.__HOY,
+        cargado_en:'2026-08-05T10:05:00Z' },
+    ];
+    misPlanes = [];
+  `);
+  window.__HOY = HOY;
+  window.__setProp(null);          // limpiar la propuesta que quedó de la prueba 7
+  eval(`pedidos[0].fecha_pedido = window.__HOY;
+        poolPedidos[0].fecha_pedido = window.__HOY;
+        poolPedidos[1].fecha_pedido = window.__HOY;`);
+  window.__poblar();
+
+  ok('16. el repartidor cuenta también los bultos ya escaneados',
+     /Hans Stuardo — 2 activos/.test([...$('rutaRep').options].map(o=>o.textContent).join(' | ')),
+     [...$('rutaRep').options].map(o=>o.textContent).join(' | '));
+
+  $('rutaRep').value = 'r1';
+  const ruta16 = window.__deRuta().map(p=>p.id).sort();
+  ok('16b. y su ruta trae el escaneado y el que falta escanear',
+     ruta16.join(',') === '301,302', ruta16.join(','));
+
+  const ord16 = window.__ordenar(window.__deRuta()).map(p=>p.id);
+  ok('16c. en el orden guardado (el escaneado va primero)',
+     ord16.join(',') === '302,301', ord16.join(','));
+
+  $('rutaRep').value = '';
+  ok('16d. un bulto cargado sin repartidor sale en «Sin asignar»',
+     window.__mapa().map(p=>p.id).join(',') === '303',
+     window.__mapa().map(p=>p.id).join(','));
+
+  eval('pedidos = window.__P; poolPedidos = []; misPlanes = window.__PL; clientes = [{id:1,nombre:"DISTRIBUIDORA PEPITO",lat:-33.45,lng:-70.66}];');
+
+  // ---------- 17. sin la red instalada, todo como antes ----------
   eval('HAY_POOL = false;');
   window.__poblar();
   const ops2 = [...$('rutaRep').options].map(o => o.textContent);
-  ok('16. sin la red, el mapa cuenta solo por repartidor_id',
+  ok('17. sin la red, el mapa cuenta solo por repartidor_id',
      /Hans Stuardo — 0 activos/.test(ops2.join(' | ')) &&
      /Martin Lagos — 2 activos/.test(ops2.join(' | ')), ops2.join(' | '));
   eval('HAY_POOL = true;');
