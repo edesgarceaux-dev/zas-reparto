@@ -61,9 +61,12 @@ const SUPA = 'https://racwaageoajxaxzqtjio.supabase.co';
 const KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJhY3dhYWdlb2FqeGF4enF0amlvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU1MzU3NjUsImV4cCI6MjEwMTExMTc2NX0.9SijMMVHYM2c6oYUc6mA62XpWw4Y2zf8d9HhalPSJWA';
 const q = new URLSearchParams(location.search);
 const cod = q.get('p'), tok = q.get('t');
-let mapa=null, mDest=null, mRep=null;
+let mapa=null, mDest=null, mRep=null, timer=null;
 
 const fmt = ts => ts ? new Date(ts).toLocaleString('es-CL',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}) : null;
+// escapa datos que vienen de terceros (dirección de Jumpseller/ML, nota del
+// repartidor) antes de meterlos al HTML — si no, un <img onerror> ejecuta JS
+const esc = s => String(s??'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
 async function cargar(){
   if(!cod || !tok){ return errorUI('Link incompleto','Pide nuevamente tu link de seguimiento.'); }
@@ -82,12 +85,12 @@ async function cargar(){
 
 function errorUI(t, s){
   document.getElementById('cont').innerHTML =
-    `<div class="card err"><div class="ico">🔍</div><h2>${t}</h2><p>${s}</p></div>`;
+    `<div class="card err"><div class="ico">🔍</div><h2>${esc(t)}</h2><p>${esc(s)}</p></div>`;
 }
 
 function pintar(d){
   document.getElementById('tEmpresa').textContent = d.empresa ? `Pedido de ${d.empresa}` : 'Seguimiento de tu pedido';
-  document.getElementById('tCodigo').textContent = `${d.codigo}${d.cliente ? ' · para '+d.cliente : ''}`;
+  document.getElementById('tCodigo').textContent = `${d.codigo||''}${d.cliente ? ' · para '+d.cliente : ''}`;
 
   const h = {};
   (d.historial||[]).forEach(x=>{ if(!h[x.estado]) h[x.estado]=x.en; });
@@ -96,20 +99,25 @@ function pintar(d){
   const fallido = d.estado==='no_entregado';
   const cancelado = d.estado==='cancelado';
 
+  // llegamos a un estado final: no tiene sentido seguir consultando
+  if((entregado || fallido || cancelado) && timer){ clearInterval(timer); timer=null; }
+
+  // datos crudos; se escapan en cada punto de inserción (una sola vez)
+  const nota = d.nota || '', repartidor = d.repartidor || 'Tu repartidor';
   const cab = entregado
-    ? ['✅','¡Pedido entregado!', d.nota || 'Gracias por tu compra.']
+    ? ['✅','¡Pedido entregado!', nota ? esc(nota) : 'Gracias por tu compra.']
     : fallido
-    ? ['😕','No pudimos entregar', (d.nota?d.nota+' · ':'')+'Nos contactaremos para reintentar.']
+    ? ['😕','No pudimos entregar', (nota?esc(nota)+' · ':'')+'Nos contactaremos para reintentar.']
     : cancelado
     ? ['🚫','Pedido cancelado','Si crees que es un error, contacta a la tienda.']
     : enCamino
-    ? ['🛵','¡Va en camino!', `${d.repartidor||'Tu repartidor'} está en ruta hacia tu dirección.`]
+    ? ['🛵','¡Va en camino!', `${esc(repartidor)} está en ruta hacia tu dirección.`]
     : ['📦','Preparando tu entrega', `Programado para el ${d.fecha_despacho ? new Date(d.fecha_despacho+'T12:00:00').toLocaleDateString('es-CL',{weekday:'long',day:'numeric',month:'long'}) : 'próximo despacho'}.`];
 
   const pasos = [
     ['Pedido recibido', fmt(d.creado_en), true],
     ['Asignado a repartidor', fmt(d.asignado_en || h['asignado']), !!(d.asignado_en || h['asignado'])],
-    [enCamino ? `En camino con ${d.repartidor||'tu repartidor'}` : 'En camino', fmt(h['en_camino']), !!h['en_camino']],
+    [enCamino ? `En camino con ${repartidor}` : 'En camino', fmt(h['en_camino']), !!h['en_camino']],
     fallido
       ? ['No entregado', fmt(h['no_entregado']), true, 'malo']
       : ['Entregado', fmt(d.entregado_en || h['entregado']), entregado],
@@ -129,10 +137,10 @@ function pintar(d){
         const clase = p[3]==='malo' ? 'malo' : p[2] ? 'hecho' : (i===idxActual ? 'actual' : 'futuro');
         return `<div class="paso ${clase}">
           <div class="col"><div class="pin">${p[3]==='malo'?'✕':p[2]?'✓':i+1}</div>${i<pasos.length-1?'<div class="linea"></div>':''}</div>
-          <div class="tx"><div class="tit">${p[0]}</div><div class="sub">${p[1] || (clase==='actual' ? 'En proceso…' : 'Pendiente')}</div></div>
+          <div class="tx"><div class="tit">${esc(p[0])}</div><div class="sub">${p[1] ? esc(p[1]) : (clase==='actual' ? 'En proceso…' : 'Pendiente')}</div></div>
         </div>`;
       }).join('')}
-      <div style="font-size:12px;color:#8a877e;margin-top:2px">📍 ${d.direccion||''}${d.comuna?', '+d.comuna:''}</div>
+      <div style="font-size:12px;color:#8a877e;margin-top:2px">📍 ${esc(d.direccion||'')}${d.comuna?', '+esc(d.comuna):''}</div>
     </div>
     <div class="card" id="cardMapa" style="display:none;padding:10px"><div id="mapa"></div></div>`;
 
@@ -159,7 +167,7 @@ function pintar(d){
 }
 
 cargar();
-setInterval(cargar, 15000); // en vivo cada 15 s
+timer = setInterval(cargar, 15000); // en vivo cada 15 s (se corta en estado final)
 </script>
 </body>
 </html>

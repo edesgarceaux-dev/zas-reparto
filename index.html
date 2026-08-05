@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ZAS Reparto — Panel de Control</title>
-<!-- panel v1.52 -->
+<!-- panel v1.53 -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -1806,11 +1806,24 @@ async function cqProcesar(texto){
     cqBip(false); return;
   }
   const anterior = p.repartidor_id;
-  const { error } = await sb.from('pedidos')
-    .update({repartidor_id: rep, estado: 'asignado'}).eq('id', p.id);
-  if(error){ cqAviso('Error al asignar: '+error.message, 'err'); cqBip(false); return; }
-
-  p.repartidor_id = rep; p.estado = 'asignado';   // reflejo inmediato en pantalla
+  /* v1.53 — antes esto hacía un update directo `.eq('id')`: para un pedido
+     COMPARTIDO dejaba empresa_reparto_id en NULL, así que otra empresa se lo
+     podía llevar igual aunque acá dijera "cargado"; y con 0 filas (RLS, o
+     tomado por otro) marcaba éxito en falso. Ahora usa el mismo camino en
+     firme que el panel: tomar_y_asignar para compartidos, update verificado
+     para los propios. */
+  const r = await asignarRepartidorA([p.id], rep);
+  if(r.errores.length){ cqAviso('Error al asignar: '+r.errores[0], 'err'); cqBip(false); return; }
+  /* Carga FÍSICA por QR: el bulto va a la moto, así que solo vale si quedó EN
+     FIRME (r.asignados = tomas firmes + propios). Un "previsto" no basta: si
+     otra empresa se adelantó, el pedido es de ella y no hay que cargarlo. */
+  if(r.asignados < 1){
+    const motivo = r.rechazados?.[0]?.motivo
+      || (r.previstos ? 'otra empresa se adelantó — no lo cargues' : 'no se pudo cargar');
+    cqAviso('❌ ' + (p.externo_id?'#'+p.externo_id:(p.codigo||'#'+p.id)) + ' — ' + motivo, 'err');
+    cqBip(false); return;
+  }
+  p.repartidor_id = rep; if(p.estado === 'pendiente') p.estado = 'asignado';  // reflejo inmediato
   const etiqueta = p.externo_id ? '#'+p.externo_id : (p.codigo || '#'+p.id);
   cqHechos.push({
     id: p.id, etiqueta, anterior,
@@ -2396,9 +2409,9 @@ window.imprimirManifiesto = ()=>{
 
 /* ---------- DATOS ---------- */
 async function cargarTodo(){
-  // si hay pedidos tomados y sin repartidor a los que se les pasó la hora,
-  // vuelven solos a quedar compartidos antes de que miremos nada
-  try { await sb.rpc('liberar_vencidos'); } catch(_){}
+  // (v1.53) Se quitó la llamada a liberar_vencidos: es del pool viejo, que ya
+  // no se usa en el modelo "asignar es quedárselo". El backend le revocó el
+  // permiso; llamarla acá solo gastaba una ida a la base en cada recarga.
   const [p1,p2,p3,p4,p5,p6,p7,p8,p9] = await Promise.all([
     sb.from('perfiles').select().order('nombre'),
     sb.from('pedidos').select().order('creado_en',{ascending:false}).limit(1000),
@@ -2880,11 +2893,31 @@ $('cPortalCrear').onclick = async ()=>{
   }catch(err){ est.innerHTML = `<span style="color:#d03b3b">${err.message}</span>`; }
   finally{ $('cPortalCrear').disabled = false; }
 };
-window.conectarMeli = ()=>{
+window.conectarMeli = async ()=>{
   if(!clienteEditando){ toast('Guarda primero el cliente y vuelve a editarlo'); return; }
-  const redirect = encodeURIComponent(SUPABASE_URL + '/functions/v1/ml-oauth');
-  window.open(`https://auth.mercadolibre.cl/authorization?response_type=code&client_id=7050388200486625&redirect_uri=${redirect}&state=cliente-${clienteEditando}`,
-    '_blank');
+  // v1.53 — el `state` ahora lo FIRMA el servidor (ml-oauth-start), que
+  // verifica que sos admin y que el cliente trabaja con tu empresa. Sin la
+  // firma, cualquiera con cuenta ML podía conectarla a un cliente ajeno.
+  // Abrimos la ventana ya (para que el navegador no la bloquee) y le
+  // cargamos la URL cuando llega el state.
+  const win = window.open('', '_blank');
+  try{
+    const sesion = (await sb.auth.getSession()).data.session;
+    const resp = await fetch(SUPABASE_URL + '/functions/v1/ml-oauth-start', {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json', apikey:SUPABASE_KEY,
+                Authorization:'Bearer '+(sesion?.access_token||'') },
+      body: JSON.stringify({ clienteId: clienteEditando }),
+    });
+    const r = await resp.json();
+    if(!r.ok || !r.state) throw new Error(r.error || 'No se pudo iniciar la conexión.');
+    const redirect = encodeURIComponent(SUPABASE_URL + '/functions/v1/ml-oauth');
+    const dest = `https://auth.mercadolibre.cl/authorization?response_type=code&client_id=7050388200486625&redirect_uri=${redirect}&state=${encodeURIComponent(r.state)}`;
+    if(win) win.location = dest; else window.open(dest, '_blank');
+  }catch(err){
+    if(win) win.close();
+    toast('No se pudo conectar MercadoLibre: '+err.message);
+  }
 };
 $('cInteg').onchange = actualizarWebhookBox;
 $('cConectar').onclick = async ()=>{

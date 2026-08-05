@@ -37,7 +37,7 @@ Deno.serve(async (req) => {
     const uid = userData?.user?.id;
     if (!uid) return json({ ok: false, error: "Sesión inválida." }, 401);
     const { data: perfil } = await supa.from("perfiles")
-      .select("rol, activo").eq("id", uid).single();
+      .select("rol, activo, empresa_reparto_id, superadmin").eq("id", uid).single();
     if (perfil?.rol !== "admin" || !perfil?.activo) {
       return json({ ok: false, error: "Solo administradores." }, 403);
     }
@@ -46,6 +46,22 @@ Deno.serve(async (req) => {
     const { clienteId, login, authtoken } = await req.json();
     if (!clienteId || !login || !authtoken) {
       return json({ ok: false, error: "Faltan datos (cliente, login o token)." }, 400);
+    }
+
+    // 🔒 El admin solo puede conectar la tienda de un cliente que trabaja CON
+    // su empresa (vínculo activo). El superadmin puede con cualquiera. Sin
+    // esto, un admin de otra empresa podía redirigir los hooks de la tienda
+    // Jumpseller de cualquier cliente de la red.
+    if (!perfil.superadmin) {
+      const { data: vinc } = await supa.from("cliente_empresas")
+        .select("cliente_id")
+        .eq("cliente_id", Number(clienteId))
+        .eq("empresa_reparto_id", perfil.empresa_reparto_id)
+        .eq("estado", "activa")
+        .maybeSingle();
+      if (!vinc) {
+        return json({ ok: false, error: "Ese cliente no está vinculado a tu empresa." }, 403);
+      }
     }
     const cred = `login=${encodeURIComponent(login)}&authtoken=${encodeURIComponent(authtoken)}`;
 

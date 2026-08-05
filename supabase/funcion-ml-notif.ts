@@ -5,8 +5,9 @@
 // DESACTIVAR "Verify JWT".
 // Requiere el secreto ML_SECRET.
 // En la app de MercadoLibre, configurar "URL de callbacks de notificaciones":
-//   https://<ref>.supabase.co/functions/v1/ml-notif   (tópico: orders_v2)
+//   https://<ref>.supabase.co/functions/v1/ml-notif?token=<WEBHOOK_TOKEN>  (tópico: orders_v2)
 // Solo ingresa ventas PAGADAS con envío Flex (logistic_type = self_service).
+// Requiere el secreto WEBHOOK_TOKEN (el mismo de las otras funciones).
 // ============================================================
 import { createClient } from "npm:@supabase/supabase-js@2";
 
@@ -15,6 +16,14 @@ const ok = (msg: string) => new Response(msg, { status: 200 });
 
 Deno.serve(async (req) => {
   try {
+    // 🔒 Sin Verify JWT, ML llega sin credenciales; el candado es un token
+    // secreto en la URL de callback registrada en la app de ML. Sin él,
+    // cualquiera podría golpear esta función y forzar refrescos de token.
+    const esperado = Deno.env.get("WEBHOOK_TOKEN");
+    if (!esperado || new URL(req.url).searchParams.get("token") !== esperado) {
+      return new Response("no autorizado", { status: 401 });
+    }
+
     const body = await req.json().catch(() => null);
     if (!body?.resource || !body?.user_id) return ok("sin datos");
     if (!String(body.resource).startsWith("/orders/")) return ok("tópico ignorado");

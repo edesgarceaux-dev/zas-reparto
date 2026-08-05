@@ -12,6 +12,23 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 const APP_ID = "7050388200486625";
 const PANEL = "https://edesgarceaux-dev.github.io/zas-reparto/";
 
+// Verifica el state FIRMADO que arma ml-oauth-start: "cliente-<id>.<exp>.<sig>".
+// Devuelve el cliente_id solo si la firma HMAC y el vencimiento son válidos.
+// Sin esto, cualquiera con cuenta ML podía conectarla a un cliente ajeno.
+const b64url = (buf: ArrayBuffer) =>
+  btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+async function clienteDeState(state: string, secreto: string): Promise<number> {
+  const partes = state.split(".");
+  if (partes.length !== 3) return 0;
+  const [p1, exp, sig] = partes;
+  const key = await crypto.subtle.importKey(
+    "raw", new TextEncoder().encode(secreto), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const esperado = b64url(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`${p1}.${exp}`)));
+  if (sig !== esperado) return 0;                      // firma inválida
+  if (!(Number(exp) > Date.now())) return 0;           // vencido
+  return Number((p1.match(/cliente-(\d+)/) ?? [])[1] ?? "0");
+}
+
 // Redirige de vuelta al panel, que muestra el resultado como notificación.
 const pagina = (titulo: string, cuerpo: string, ok: boolean) =>
   new Response(null, {
@@ -26,10 +43,11 @@ Deno.serve(async (req) => {
     const url = new URL(req.url);
     const code = url.searchParams.get("code");
     const state = url.searchParams.get("state") ?? "";
-    const clienteId = Number((state.match(/cliente-(\d+)/) ?? [])[1] ?? "0");
+    const secretoFirma = Deno.env.get("ML_SECRET")!;
+    const clienteId = await clienteDeState(state, secretoFirma);
     if (!code || !clienteId) {
-      return pagina("Falta información",
-        "Vuelve al panel de ZAS y usa el botón 'Conectar MercadoLibre'.", false);
+      return pagina("Enlace vencido o inválido",
+        "Vuelve al panel de ZAS y usa de nuevo el botón 'Conectar MercadoLibre'.", false);
     }
 
     const redirect = `${Deno.env.get("SUPABASE_URL")}/functions/v1/ml-oauth`;
