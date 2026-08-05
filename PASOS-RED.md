@@ -1,6 +1,6 @@
 # TODO LO QUE HAY QUE HACER — en orden
 
-Panel v1.45 · Maestro v1.2 · APK v2.8.1
+Panel v1.46 · Maestro v1.2 · APK v2.9.0
 Hacelo de arriba abajo, sin saltear. Toma unos 20 minutos.
 
 ---
@@ -19,12 +19,14 @@ Uno por uno. Todos son seguros de repetir. Están en la carpeta `supabase/`.
 | 5 | `migracion-plan-y-carga.sql` | planificar en paralelo + «Mi carga» + avisos |
 | 6 | `migracion-asignar-por-qr.sql` | asignar repartidor escaneando, desde la app |
 | 7 | `migracion-permisos.sql` | quién entra al panel y quién a la app |
+| 8 | `migracion-archivo-fotos.sql` | respaldo descargable y limpieza de fotos viejas |
 
 **Qué mirar en cada una** (te devuelven una tabla al final):
 - En la **3**: `comunas_que_reparte` tiene que dar **52**. Abajo te lista las comunas que quedaron fuera de zona — si ves una de la RM mal escrita, la agregás después desde el maestro.
 - En la **5**: `clientes_por_reglas` + `clientes_modo_abierto` tiene que ser el total de tus clientes.
 - En la **6**: `permiso_creado` = 1 y `funciones_creadas` = 3. `cuentas_que_pueden_asignar` son tus admin, que lo reciben prendido.
 - En la **7**: la fila `repartidor` tiene que decir `entran_al_panel = 0`. Ahí es donde tus repartidores dejan de poder entrar a la página.
+- En la **8**: `tabla_creada` = 1 y `funciones_creadas` = 5.
 
 **No corras** `migracion-pool-empresas.sql`: está anulada, el archivo es solo un cartel.
 
@@ -38,14 +40,14 @@ la raíz de `zas-reparto\` (pisando lo que haya):
 
 | Archivo que te mandé | Dónde va |
 |---|---|
-| `index.html` | raíz — **es el panel v1.45 ya renombrado** |
+| `index.html` | raíz — **es el panel v1.46 ya renombrado** |
 | `panel-maestro.html` | raíz |
 | `seguimiento.html` | raíz |
 
 ```
 git add index.html panel-maestro.html seguimiento.html panel/ supabase/ test-*.mjs PASOS-RED.md
-git add ZAS-Reparto-v2.8.1-moderno.apk ZAS-Reparto-v2.8.1-antiguo.apk
-git commit -m "v1.45 el mapa ve los pedidos previstos"
+git add ZAS-Reparto-v2.9.0-moderno.apk ZAS-Reparto-v2.9.0-antiguo.apk
+git commit -m "v1.46 respaldo y limpieza de fotos"
 git push
 ```
 
@@ -55,7 +57,7 @@ Esperá ~1 minuto a que GitHub Pages reconstruya y entrá con **Ctrl+F5**.
 
 ## 3. Instalar la APK
 
-**`ZAS-Reparto-v2.8.1-moderno.apk`** en los teléfonos de los repartidores
+**`ZAS-Reparto-v2.9.0-moderno.apk`** en los teléfonos de los repartidores
 **y en el del que reparte la pega en bodega**.
 (La `-antiguo` es solo para teléfonos viejos de 32 bits.)
 
@@ -182,6 +184,42 @@ el plan, no en el pedido. Ahora el mapa mira los dos lados:
 - **Guardar orden** manda cada pedido a donde corresponde: los tuyos a
   `pedidos.ruta_orden`, los compartidos al plan. En una ruta mezclada cada uno
   conserva su posición real.
+
+### Que no se te llene el servidor (v1.46)
+
+Primero, la corrección importante: **lo que se llena no es la base de datos**. Un
+pedido pesa alrededor de 1 KB; tus 7.700 pedidos al mes son 8 MB, o sea nada. La
+base puede crecer tranquila durante años. Lo que se llena es el **almacenamiento
+de las fotos de entrega**: 3 fotos por entrega, ~180 KB cada una.
+
+    258 pedidos × 3 fotos × 180 KB ≈ 140 MB por día ≈ 4,2 GB por mes
+
+Tres cosas para manejarlo, en **Reportes → 📦 Respaldo y limpieza de fotos**:
+
+**1. Las fotos nuevas pesan un tercio.** La APK ahora saca a 900 px calidad 45 en
+vez de 1280 px calidad 55: unos 70 KB en vez de 180. Se sigue leyendo el número de
+la casa y la cara de quien recibe. Con eso solo, los 4,2 GB al mes bajan a 1,6 GB.
+
+**2. El respaldo descargable.** Elegís semana, quincena o mes y bajás:
+
+- un **ZIP** con `pedidos.csv` (se abre directo en Excel: n° de envío, cliente,
+  dirección, repartidor, quién recibió, RUT, motivo de no entrega) y una carpeta
+  de fotos por pedido. Ese archivo es tu prueba de entrega;
+- un **PDF por cliente**, una página por entrega con los datos y las fotos, para
+  mandárselo al cliente cuando reclama.
+
+Consejo: bajalo **por semana**. Un mes entero son ~23.000 fotos y el navegador
+puede quedarse sin memoria. El botón **👁️ Ver qué incluye** te dice cuántas son
+antes de empezar, y te avisa si son demasiadas.
+
+**3. Liberar el espacio.** Abajo hay una tabla con lo que ocupa cada mes y si ya
+está respaldado. El botón **🧹 Liberar** borra del servidor solo las fotos que
+cumplen **las tres condiciones a la vez**: más de 90 días, ya descargadas en un
+respaldo, y de tu empresa. Los datos del pedido, quién recibió y su RUT **no se
+borran nunca** — lo único que se va son los archivos de imagen.
+
+Si nunca descargaste el respaldo de un período, ese período **no se puede borrar**.
+Es a propósito.
 
 ---
 
