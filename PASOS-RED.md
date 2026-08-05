@@ -1,6 +1,6 @@
 # TODO LO QUE HAY QUE HACER — en orden
 
-Panel v1.46 · Maestro v1.2 · APK v2.9.0
+Panel v1.47 · Maestro v1.2 · APK v2.9.0
 Hacelo de arriba abajo, sin saltear. Toma unos 20 minutos.
 
 ---
@@ -40,14 +40,14 @@ la raíz de `zas-reparto\` (pisando lo que haya):
 
 | Archivo que te mandé | Dónde va |
 |---|---|
-| `index.html` | raíz — **es el panel v1.46 ya renombrado** |
+| `index.html` | raíz — **es el panel v1.47 ya renombrado** |
 | `panel-maestro.html` | raíz |
 | `seguimiento.html` | raíz |
 
 ```
 git add index.html panel-maestro.html seguimiento.html panel/ supabase/ test-*.mjs PASOS-RED.md
 git add ZAS-Reparto-v2.9.0-moderno.apk ZAS-Reparto-v2.9.0-antiguo.apk
-git commit -m "v1.46 respaldo y limpieza de fotos"
+git commit -m "v1.47 rutas más cortas y sectores que no se cruzan"
 git push
 ```
 
@@ -220,6 +220,41 @@ borran nunca** — lo único que se va son los archivos de imagen.
 
 Si nunca descargaste el respaldo de un período, ese período **no se puede borrar**.
 Es a propósito.
+
+### Rutas más cortas y sectores que no se cruzan (v1.47)
+
+Medido con un día simulado de la RM (20 comunas, con más peso donde más se
+vende). «Repartir auto» contra las alternativas:
+
+| 500 pedidos entre 6 repartidores | km totales | radio del sector | pedidos que le quedaban mejor a otro |
+|---|---|---|---|
+| Al azar, sin mirar el mapa | 1.096 km | 20–34 km | 81% |
+| Por comuna, como se haría a mano | 512 km | 9–35 km | 45% |
+| 🤖 **Repartir auto** | **453 km** | **5–21 km** | **12%** |
+
+O sea: **la mitad de los kilómetros** que repartir sin mirar el mapa, y un 12%
+menos que agrupar por comuna. Dos arreglos concretos de esta versión:
+
+**El optimizador de ruta no corría en las rutas grandes.** Solo se ejecutaba
+hasta 80 paradas, porque medía la ruta entera para cada intento. Con 84 pedidos
+—justo lo que da repartir 500 entre 6— no hacía nada y la ruta quedaba como
+salió del «vecino más cercano», que suele ser un 25% peor. Ahora calcula solo la
+diferencia de cada cambio, así que corre entero aunque sean 500 paradas, y
+además mueve paradas sueltas a mejor lugar (or-opt). En 500 pedidos: 525 → 453 km.
+
+**Los bordes de los sectores se cruzaban.** Los sectores se armaban creciendo de
+a un pedido, y en los bordes siempre quedaban cruces. Ahora hay una pasada final
+que **intercambia pares** entre dos sectores cuando los dos quedan mejor. Como es
+un intercambio, los cupos no se mueven. Un pedido de una comuna preferida nunca
+cambia de dueño. Resultado: los pedidos «invadidos» bajaron de 13% a 5% en las
+rutas chicas, y los sectores pasaron de 18–31 km de radio a 11–22.
+
+**Sobre las comunas de preferencia**: funcionan, y al 100% — en la medición, el
+repartidor con «Maipú, Cerrillos» se llevó las 74 de 74 que había. Si te parece
+que no las respeta, lo más probable es que **no estén puestas**. Se cargan en
+**Repartidores → Editar → «Comunas de preferencia»**, separadas por coma y en
+orden de prioridad. Ahora la ventana de «🤖 Repartir auto» te dice de entrada
+cuántos repartidores las tienen puestas, así no queda la duda.
 
 ---
 

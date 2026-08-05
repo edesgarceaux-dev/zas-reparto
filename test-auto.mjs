@@ -229,13 +229,15 @@ const r = await page.evaluate(async () => {
   window.cargarTodo = async () => {};
   window.toast = m => { window.__ultimoToast = m; };
   window.confirm = () => true;
-  window.hoyStr = () => '2026-08-04';
+  const HOY = new Date().toLocaleDateString('en-CA');   // no escribir la fecha a mano:
+  window.hoyStr = () => HOY;                           // el test se rompía al pasar la medianoche
 
   const correrBoton = async (lista, cuposEscritos) => {
     window.__escritos = []; window.__orden = [];
     eval('pedidos = window.__lista; seleccion.clear();');
     window.__abrir();
     const cbs = [...document.querySelectorAll('#autoReps input[type="checkbox"]')];
+
     cbs.forEach(c => c.checked = true);
     cuposEscritos.forEach((v, i) => {
       const id = cbs[i].value;
@@ -246,7 +248,7 @@ const r = await page.evaluate(async () => {
   };
 
   {
-    const lista = hacerPedidos(258, 45).map(p => ({...p, fecha_pedido:'2026-08-04'}));
+    const lista = hacerPedidos(258, 45).map(p => ({...p, fecha_pedido:HOY}));
     window.__lista = lista;
     await correrBoton(lista, [80, 80]);
     ok('12. pido 80 y 80: se escriben exactamente 160 asignaciones',
@@ -264,8 +266,29 @@ const r = await page.evaluate(async () => {
        /98 quedaron sin asignar/.test(window.__ultimoToast || ''), window.__ultimoToast);
   }
 
+  // ---------- el aviso de las comunas de preferencia ----------
   {
-    const lista = hacerPedidos(120, 30).map(p => ({...p, fecha_pedido:'2026-08-04'}));
+    const lista = hacerPedidos(20, 0).map(p => ({...p, fecha_pedido:HOY}));
+    window.__lista = lista;
+    eval('pedidos = window.__lista; seleccion.clear();');
+    window.__perfiles.forEach(p => { delete p.comuna_preferida; });
+    window.__abrir();
+    ok('12f. si nadie tiene comunas de preferencia, el panel lo dice',
+       /Ninguno tiene comunas de preferencia/.test(
+         document.getElementById('autoPref').textContent),
+       document.getElementById('autoPref').textContent.slice(0, 80));
+    ok('12g. y explica dónde ponerlas',
+       /Repartidores/.test(document.getElementById('autoPref').innerHTML));
+    window.__perfiles[0].comuna_preferida = 'Maipú, Cerrillos';
+    window.__abrir();
+    ok('12h. y si alguno las tiene, dice cuántos son',
+       /1 de 2/.test(document.getElementById('autoPref').textContent),
+       document.getElementById('autoPref').textContent.slice(0, 80));
+    delete window.__perfiles[0].comuna_preferida;
+  }
+
+  {
+    const lista = hacerPedidos(120, 30).map(p => ({...p, fecha_pedido:HOY}));
     window.__lista = lista;
     await correrBoton(lista, [null, null]);
     ok('13. en "auto" se reparten los 120 completos',
@@ -277,7 +300,7 @@ const r = await page.evaluate(async () => {
 
   {
     // la base rechaza 12 pedidos (otro los tomó mientras tanto)
-    const lista = hacerPedidos(100, 0).map(p => ({...p, fecha_pedido:'2026-08-04'}));
+    const lista = hacerPedidos(100, 0).map(p => ({...p, fecha_pedido:HOY}));
     window.__lista = lista;
     window.__rechazar = new Set(lista.slice(0, 12).map(p => p.id));
     await correrBoton(lista, [50, 50]);
@@ -312,7 +335,7 @@ const r = await page.evaluate(async () => {
 
   {
     const lista = hacerPedidos(120, 20).map(p => ({...p,
-      fecha_pedido:'2026-08-04', empresa_reparto_id:null}));
+      fecha_pedido:HOY, empresa_reparto_id:null}));
     window.__lista = lista;
     window.__planes = []; window.__rpcs = [];
     await correrBoton(lista, [60, 60]);
@@ -331,7 +354,7 @@ const r = await page.evaluate(async () => {
   // ---------- 16. el orden de ruta va al plan, no a los pedidos ----------
   {
     const lista = hacerPedidos(20, 0).map(p => ({...p,
-      fecha_pedido:'2026-08-04', empresa_reparto_id:null}));
+      fecha_pedido:HOY, empresa_reparto_id:null}));
     window.__lista = lista;
     window.__planes = []; window.__orden = [];
     await correrBoton(lista, [20]);
@@ -350,7 +373,7 @@ const r = await page.evaluate(async () => {
   // ---------- 17. mezcla: unos míos y otros compartidos ----------
   {
     const lista = hacerPedidos(40, 0).map((p, i) => ({...p,
-      fecha_pedido:'2026-08-04', empresa_reparto_id: i < 20 ? 1 : null}));
+      fecha_pedido:HOY, empresa_reparto_id: i < 20 ? 1 : null}));
     window.__lista = lista;
     window.__planes = []; window.__escritos = []; window.__orden = [];
     await correrBoton(lista, [40]);
@@ -365,7 +388,7 @@ const r = await page.evaluate(async () => {
   // ---------- 18. la base rechaza algunos: se explica el motivo ----------
   {
     const lista = hacerPedidos(30, 0).map(p => ({...p,
-      fecha_pedido:'2026-08-04', empresa_reparto_id:null}));
+      fecha_pedido:HOY, empresa_reparto_id:null}));
     window.__lista = lista;
     window.__malos = new Set(lista.slice(0, 7).map(p => p.id));
     window.__planes = [];
@@ -380,7 +403,7 @@ const r = await page.evaluate(async () => {
   // ---------- 19. sin la migración corrida ----------
   {
     const lista = hacerPedidos(10, 0).map(p => ({...p,
-      fecha_pedido:'2026-08-04', empresa_reparto_id:null}));
+      fecha_pedido:HOY, empresa_reparto_id:null}));
     window.__lista = lista;
     window.__sinMigracion = true;
     await correrBoton(lista, [10]);

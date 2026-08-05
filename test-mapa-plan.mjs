@@ -22,6 +22,8 @@ await page.goto(url, { waitUntil: 'domcontentloaded' });
 const r = await page.evaluate(async () => {
   const out = [];
   const ok = (n, cond, extra = '') => out.push({ n, ok: !!cond, extra });
+  // la fecha se calcula: escrita a mano, el test se rompe al pasar la medianoche
+  const HOY = new Date().toLocaleDateString('en-CA');
   const $ = id => document.getElementById(id);
 
   // 6 compartidos previstos para Hans, 2 propios de Martín, 2 sin nadie
@@ -31,21 +33,21 @@ const r = await page.evaluate(async () => {
     direccion: 'Calle ' + i, comuna: 'La Florida', cliente_id: 1,
     estado: 'pendiente', empresa_reparto_id: null, repartidor_id: null,
     ruta_orden: null, lat: -33.55 + i * .01, lng: -70.58 + i * .01,
-    fecha_pedido: '2026-08-04', creado_en: '2026-08-04T10:00:00Z',
+    fecha_pedido: HOY, creado_en: '2026-08-04T10:00:00Z',
   });
   for (let i = 7; i <= 8; i++) PED.push({
     id: i, codigo: 'ZAS-' + i, cliente_nombre: 'Propio ' + i,
     direccion: 'Calle ' + i, comuna: 'Maipú', cliente_id: 1,
     estado: 'asignado', empresa_reparto_id: 1, repartidor_id: 'r2',
     ruta_orden: i - 6, lat: -33.51 + i * .01, lng: -70.76 + i * .01,
-    fecha_pedido: '2026-08-04', creado_en: '2026-08-04T10:00:00Z',
+    fecha_pedido: HOY, creado_en: '2026-08-04T10:00:00Z',
   });
   for (let i = 9; i <= 10; i++) PED.push({
     id: i, codigo: 'ZAS-' + i, cliente_nombre: 'Sin nadie ' + i,
     direccion: 'Calle ' + i, comuna: 'Ñuñoa', cliente_id: 1,
     estado: 'pendiente', empresa_reparto_id: null, repartidor_id: null,
     ruta_orden: null, lat: -33.45, lng: -70.60,
-    fecha_pedido: '2026-08-04', creado_en: '2026-08-04T10:00:00Z',
+    fecha_pedido: HOY, creado_en: '2026-08-04T10:00:00Z',
   });
 
   window.__P = PED;
@@ -69,7 +71,7 @@ const r = await page.evaluate(async () => {
     window.__guardar  = guardarOrden;
     window.__setProp  = v => { ordenPropuesto = v; };
   `);
-  window.hoyDia = () => '2026-08-04';
+  window.hoyDia = () => HOY;
 
   // ---------- 1. el selector cuenta los previstos ----------
   window.__poblar();

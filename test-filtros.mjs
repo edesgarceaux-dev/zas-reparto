@@ -19,33 +19,35 @@ await page.goto(url, { waitUntil: 'domcontentloaded' });
 const r = await page.evaluate(async () => {
   const out = [];
   const ok = (n, cond, extra = '') => out.push({ n, ok: !!cond, extra });
+  // la fecha se calcula: escrita a mano, el test se rompe al pasar la medianoche
+  const HOY = new Date().toLocaleDateString('en-CA');
   const $ = id => document.getElementById(id);
 
   const PEDIDOS = [
     // MercadoLibre Flex con n° de envío: es el que va en la etiqueta
     { id:1, codigo:'ZAS-03833', externo_id:'ML-2000123', envio_id:'44001122333',
       origen:'mercadolibre', cliente_nombre:'Patricia Morales', direccion:'Estacion carampangue 0735',
-      comuna:'Puente Alto', estado:'pendiente', fecha_pedido:'2026-08-04', cliente_id:1,
+      comuna:'Puente Alto', estado:'pendiente', fecha_pedido:HOY, cliente_id:1,
       repartidor_id:null, empresa_reparto_id:1 },
     // MercadoLibre al que todavía le falta el n° de envío
     { id:2, codigo:'ZAS-03834', externo_id:'ML-2000124', envio_id:null,
       origen:'mercadolibre', cliente_nombre:'Rosa Díaz', direccion:'Los Aromos 12',
-      comuna:'Maipú', estado:'asignado', fecha_pedido:'2026-08-04', cliente_id:1,
+      comuna:'Maipú', estado:'asignado', fecha_pedido:HOY, cliente_id:1,
       repartidor_id:'r1', empresa_reparto_id:1 },
     // Jumpseller
     { id:3, codigo:'ZAS-03835', externo_id:'82652', envio_id:null,
       origen:'jumpseller', cliente_nombre:'Luis Soto', direccion:'Gran Avenida 900',
-      comuna:'La Cisterna', estado:'en_camino', fecha_pedido:'2026-08-04', cliente_id:1,
+      comuna:'La Cisterna', estado:'en_camino', fecha_pedido:HOY, cliente_id:1,
       repartidor_id:'r2', empresa_reparto_id:1 },
     // cargado a mano, sin ningún número de tienda
     { id:4, codigo:'ZAS-03836', externo_id:null, envio_id:null,
       origen:'manual', cliente_nombre:'Ana Rojas', direccion:'Sucre 44',
-      comuna:'Ñuñoa', estado:'entregado', fecha_pedido:'2026-08-04', cliente_id:1,
+      comuna:'Ñuñoa', estado:'entregado', fecha_pedido:HOY, cliente_id:1,
       repartidor_id:'r1', empresa_reparto_id:1 },
     // compartido: todavía no es de nadie
     { id:5, codigo:'ZAS-03837', externo_id:'82999', envio_id:null,
       origen:'jumpseller', cliente_nombre:'Mario Pino', direccion:'Vicuña 10',
-      comuna:'Recoleta', estado:'pendiente', fecha_pedido:'2026-08-04', cliente_id:1,
+      comuna:'Recoleta', estado:'pendiente', fecha_pedido:HOY, cliente_id:1,
       repartidor_id:null, empresa_reparto_id:null },
   ];
   const GENTE = [
@@ -247,11 +249,11 @@ const r = await page.evaluate(async () => {
       { id:77, codigo:'ZAS-04000', envio_id:'47677019895', origen:'mercadolibre',
         cliente_nombre:'Constanza Vidal', direccion:'Aldunate 1064', comuna:'Santiago',
         estado:'asignado', cliente_id:1, empresa_reparto_id:1, repartidor_id:'r1',
-        cargado_en:'2026-08-04T11:31:00Z', fecha_pedido:'2026-08-04' },
+        cargado_en:'2026-08-04T11:31:00Z', fecha_pedido:HOY },
       { id:78, codigo:'ZAS-04001', envio_id:'47677019896', origen:'mercadolibre',
         cliente_nombre:'Otro Cliente', direccion:'Bandera 55', comuna:'Santiago',
         estado:'asignado', cliente_id:1, empresa_reparto_id:1, repartidor_id:'r1',
-        cargado_en:'2026-08-04T11:32:00Z', fecha_pedido:'2026-08-04' },
+        cargado_en:'2026-08-04T11:32:00Z', fecha_pedido:HOY },
     ];
     poolSel = new Set();
     window.__pintarPool = pintarPool;

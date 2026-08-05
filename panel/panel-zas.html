@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ZAS Reparto — Panel de Control</title>
-<!-- panel v1.46 -->
+<!-- panel v1.47 -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -798,6 +798,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
   <p id="autoInfo" style="color:var(--ink-2);font-size:13px;margin-top:6px"></p>
   <label>Repartidores que saldrán a ruta</label>
   <div id="autoReps" style="display:flex;flex-direction:column;gap:4px;max-height:230px;overflow:auto"></div>
+  <div id="autoPref" style="margin-top:9px;padding:9px 12px;border-radius:9px;font-size:12px;line-height:1.5;border:1px solid"></div>
   <p style="color:var(--muted);font-size:11.5px;margin-top:8px">Se agrupan por cercanía (sectores alrededor del centro de los pedidos) y se reparten parejo. Después puedes ajustar cada ruta en la pestaña Mapa y optimizarla.</p>
   <div class="err" id="autoErr"></div>
   <div class="foot">
@@ -1931,6 +1932,20 @@ window.abrirAutoRepartir = ()=>{
       <input type="number" min="1" placeholder="auto" data-cupo="${r.id}" title="Cantidad de pedidos para este repartidor (vacío = repartir parejo)"
         style="width:74px;padding:5px 8px;font-size:12.5px" onclick="event.preventDefault();event.stopPropagation()">
     </label>`).join('');
+  /* v1.47 — si nadie tiene comunas de preferencia, decirlo: es la causa
+     número uno de "no está respetando las comunas". Si no están puestas en
+     la ficha del repartidor, no hay nada que respetar. */
+  const conPref = reps.filter(r=>(r.comuna_preferida||'').trim()).length;
+  $('autoPref').innerHTML = conPref
+    ? `⭐ <b>${conPref} de ${reps.length}</b> tienen comunas de preferencia: esas se les dan primero, ` +
+      `y el resto se completa con lo más cercano a su sector.`
+    : `⭐ <b>Ninguno tiene comunas de preferencia todavía.</b> Se van a repartir solo por cercanía. ` +
+      `Si querés que cada uno tire siempre para su lado, ponéselas en ` +
+      `<b>Repartidores → Editar → «Comunas de preferencia»</b>.`;
+  $('autoPref').style.background = conPref ? '#EEF4FF' : '#FFF8E6';
+  $('autoPref').style.borderColor = conPref ? '#C9DAF8' : '#F0E0B0';
+  $('autoPref').style.color = conPref ? '#1e3a6b' : '#8a6100';
+
   $('autoErr').textContent='';
   $('mAuto').classList.add('on');
 };
@@ -2138,6 +2153,48 @@ function repartirEnSectores(lista, cupos, prefs){
     libres.sort((a,b)=> b.libre - a.libre || a.j - b.j);
     grupos[libres[0].j].push(p);
   }
+  /* ---------- 🆕 v1.47: emprolijar los bordes ----------
+     Hasta acá los sectores se armaron creciendo de a un pedido, y en los
+     bordes siempre quedan cruces: pedidos que en realidad le quedaban más
+     a mano al sector de al lado. Esta pasada intercambia PARES de pedidos
+     entre dos sectores cuando los dos quedan más cerca de su centro.
+     Como es un intercambio, los cupos no se mueven ni un pedido.
+     Un pedido de una comuna preferida NUNCA se cambia de dueño. */
+  const centroDe = g => g.length
+    ? { lat: g.reduce((s,p)=>s+p.lat,0)/g.length, lng: g.reduce((s,p)=>s+p.lng,0)/g.length }
+    : null;
+  const anclado = (p, i) => {
+    const pref = parsePrefs(prefs[i]);
+    return pref.some(c => coincide(p, c));
+  };
+
+  for(let vuelta=0; vuelta<12; vuelta++){
+    const centros = grupos.map(centroDe);
+    let cambios = 0;
+    for(let a=0; a<n; a++){
+      for(let b=a+1; b<n; b++){
+        if(!centros[a] || !centros[b]) continue;
+        for(let x=0; x<grupos[a].length; x++){
+          const pa = grupos[a][x];
+          if(pa.lat==null || anclado(pa, a)) continue;
+          const gananciaA = distKm(pa, centros[a]) - distKm(pa, centros[b]);
+          if(gananciaA <= 0) continue;          // a este no le conviene moverse
+          for(let y=0; y<grupos[b].length; y++){
+            const pb = grupos[b][y];
+            if(pb.lat==null || anclado(pb, b)) continue;
+            const gananciaB = distKm(pb, centros[b]) - distKm(pb, centros[a]);
+            if(gananciaA + gananciaB > 0.05){   // el cambio vale la pena
+              grupos[a][x] = pb; grupos[b][y] = pa;
+              cambios++;
+              break;
+            }
+          }
+        }
+      }
+    }
+    if(!cambios) break;
+  }
+
   return { grupos, fuera: [...restantes, ...sobran] };
 }
 
@@ -2149,6 +2206,8 @@ function ordenarGrupoPorCercania(grupo){
   const bodega = clientes.find(c=>c.lat!=null && c.lng!=null);
   const inicio = bodega ? {lat:bodega.lat, lng:bodega.lng}
     : { lat: conG.reduce((s,p)=>s+p.lat,0)/conG.length, lng: conG.reduce((s,p)=>s+p.lng,0)/conG.length };
+
+  // 1) primera pasada: siempre al vecino más cercano
   let ruta = [], pend = [...conG], actual = inicio;
   while(pend.length){
     let m = 0;
@@ -2156,15 +2215,56 @@ function ordenarGrupoPorCercania(grupo){
     const s = pend.splice(m,1)[0];
     ruta.push(s); actual = s;
   }
-  if(conG.length <= 80){ // 2-opt solo en grupos manejables (deshace cruces)
-    const kmDe = r=>{ let km=distKm(inicio,r[0]); for(let i=1;i<r.length;i++) km+=distKm(r[i-1],r[i]); return km; };
-    let mejoro = true, v = 0;
-    while(mejoro && v++ < 15){
-      mejoro = false;
-      for(let i=0;i<ruta.length-1;i++){
-        for(let j=i+1;j<ruta.length;j++){
-          const cand = [...ruta.slice(0,i), ...ruta.slice(i,j+1).reverse(), ...ruta.slice(j+1)];
-          if(kmDe(cand) < kmDe(ruta) - 0.001){ ruta = cand; mejoro = true; }
+
+  /* 2) deshacer los cruces (2-opt) y mover paradas sueltas a mejor lugar
+        (or-opt).
+
+     🐛 v1.47 — antes esto SOLO corría en rutas de hasta 80 paradas, porque
+     medía la ruta entera para cada intento: con 84 pedidos —que es
+     justo lo que da repartir 500 entre 6— no se ejecutaba nada y la ruta
+     quedaba tal cual salió del vecino más cercano, que suele ser un 25%
+     peor. Ahora se calcula solo la DIFERENCIA de cada cambio, que es una
+     resta, así que corre entero aunque sean 500 paradas. */
+  const d = (a,b) => distKm(a,b);
+  const nodo = i => (i < 0 ? inicio : ruta[i]);
+  let mejoro = true, vueltas = 0;
+  while(mejoro && vueltas++ < 40){
+    mejoro = false;
+    // --- 2-opt: dar vuelta el tramo i..j si acorta ---
+    for(let i=0; i<ruta.length-1; i++){
+      const a = nodo(i-1), b = ruta[i];
+      const dab = d(a,b);
+      for(let j=i+1; j<ruta.length; j++){
+        const c = ruta[j], e = ruta[j+1];
+        const antes   = dab + (e ? d(c,e) : 0);
+        const despues = d(a,c) + (e ? d(b,e) : 0);
+        if(despues < antes - 0.0005){
+          for(let x=i, y=j; x<y; x++, y--){ const t=ruta[x]; ruta[x]=ruta[y]; ruta[y]=t; }
+          mejoro = true;
+          break;
+        }
+      }
+    }
+    // --- or-opt: mover 1, 2 o 3 paradas seguidas a otro punto de la ruta ---
+    for(let largo=1; largo<=3 && ruta.length>largo+1; largo++){
+      for(let i=0; i+largo<=ruta.length; i++){
+        const seg = ruta.slice(i, i+largo);
+        const ant = nodo(i-1), sig = ruta[i+largo];
+        const quitar = d(ant, seg[0]) + (sig ? d(seg[largo-1], sig) : 0)
+                     - (sig ? d(ant, sig) : 0);
+        if(quitar <= 0.0005) continue;
+        const resto = [...ruta.slice(0,i), ...ruta.slice(i+largo)];
+        let mejorPos = -1, mejorGana = 0.0005;
+        for(let k=0; k<=resto.length; k++){
+          const a = k===0 ? inicio : resto[k-1], b = resto[k];
+          const poner = d(a, seg[0]) + (b ? d(seg[largo-1], b) : 0)
+                      - (b ? d(a,b) : 0);
+          const gana = quitar - poner;
+          if(gana > mejorGana){ mejorGana = gana; mejorPos = k; }
+        }
+        if(mejorPos >= 0){
+          resto.splice(mejorPos, 0, ...seg);
+          ruta = resto; mejoro = true;
         }
       }
     }
