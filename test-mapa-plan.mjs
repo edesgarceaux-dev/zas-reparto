@@ -172,7 +172,8 @@ const r = await page.evaluate(async () => {
   const AYER = (() => { const d = new Date(); d.setDate(d.getDate()-1); return iso(d); })();
   const ANTEAYER = (() => { const d = new Date(); d.setDate(d.getDate()-2); return iso(d); })();
   const ayerAlas = h => { const d = new Date(); d.setDate(d.getDate()-1);
-                          d.setHours(h,0,0,0); return d.toISOString(); };
+                          d.setHours(Math.floor(h), Math.round((h % 1) * 60), 0, 0);
+                          return d.toISOString(); };
 
   const nuevo = (id, extra) => ({
     id, codigo:'ZAS-'+id, cliente_nombre:'P'+id, direccion:'Calle '+id,
@@ -224,13 +225,80 @@ const r = await page.evaluate(async () => {
   ok('11c. sin atrasados, el cartel no aparece',
      $('mapaAtrasados').style.display === 'none', $('mapaAtrasados').style.display);
 
-  eval('pedidos = window.__P; misPlanes = window.__PL;');
+  // ============================================================
+  // 12. CADA CLIENTE CON SU HORA DE CORTE
+  //     Pepito corta a las 12:00, Ferretería a las 11:00, y un tercero
+  //     no tiene hora cargada (se asume el mediodía).
+  // ============================================================
+  eval(`clientes = [
+    { id:1, nombre:'DISTRIBUIDORA PEPITO', hora_corte:'12:00:00' },
+    { id:2, nombre:'FERRETERÍA SUR',       hora_corte:'11:00:00' },
+    { id:3, nombre:'SIN CORTE',            hora_corte:null },
+  ];`);
+  eval('window.__corte = horaCorteDe;');
 
-  // ---------- 12. sin la red instalada, todo como antes ----------
+  ok('12. lee la hora de corte de cada cliente',
+     window.__corte(1).h === 12 && window.__corte(2).h === 11,
+     JSON.stringify([window.__corte(1), window.__corte(2)]));
+  ok('12b. sin hora cargada asume el mediodía, no la medianoche',
+     window.__corte(3).h === 12 && window.__corte(3).m === 0,
+     JSON.stringify(window.__corte(3)));
+  ok('12c. y un cliente que ni existe tampoco rompe',
+     window.__corte(999).h === 12, JSON.stringify(window.__corte(999)));
+
+  window.__P3 = [
+    // un pedido de ayer a las 11:30 para cada cliente
+    nuevo(201, { cliente_id:1, fecha_pedido:AYER, creado_en: ayerAlas(11.5) }),
+    nuevo(202, { cliente_id:2, fecha_pedido:AYER, creado_en: ayerAlas(11.5) }),
+    nuevo(203, { cliente_id:3, fecha_pedido:AYER, creado_en: ayerAlas(11.5) }),
+  ];
+  eval('pedidos = window.__P3;');
+  const m3 = window.__mapa().map(p=>p.id);
+  ok('13. a las 11:30, el de Pepito (corta 12:00) queda atrasado',
+     !m3.includes(201), m3.join(','));
+  ok('13b. el de Ferretería (corta 11:00) SÍ entra al mapa',
+     m3.includes(202), m3.join(','));
+  ok('13c. y el del cliente sin corte se trata como mediodía: atrasado',
+     !m3.includes(203), m3.join(','));
+
+  // media hora antes del corte de Ferretería: ninguno entra
+  window.__P3 = [
+    nuevo(204, { cliente_id:1, fecha_pedido:AYER, creado_en: ayerAlas(10.5) }),
+    nuevo(205, { cliente_id:2, fecha_pedido:AYER, creado_en: ayerAlas(10.5) }),
+  ];
+  eval('pedidos = window.__P3;');
+  ok('14. a las 10:30 no entra ninguno de los dos',
+     window.__mapa().length === 0, window.__mapa().map(p=>p.id).join(','));
+
+  // pasadas las 12 entran los dos
+  window.__P3 = [
+    nuevo(206, { cliente_id:1, fecha_pedido:AYER, creado_en: ayerAlas(13) }),
+    nuevo(207, { cliente_id:2, fecha_pedido:AYER, creado_en: ayerAlas(13) }),
+  ];
+  eval('pedidos = window.__P3;');
+  ok('14b. y pasadas las 13:00 entran los dos',
+     window.__mapa().length === 2, window.__mapa().map(p=>p.id).join(','));
+
+  // el cartel nombra las horas de corte que están en juego
+  window.__P3 = [
+    nuevo(208, { cliente_id:1, fecha_pedido:AYER, creado_en: ayerAlas(9) }),
+    nuevo(209, { cliente_id:2, fecha_pedido:AYER, creado_en: ayerAlas(9) }),
+  ];
+  eval('pedidos = window.__P3;');
+  window.__poblar();
+  ok('15. el cartel dice qué horas de corte se aplicaron',
+     /11:00/.test($('mapaAtrasadosTxt').textContent) &&
+     /12:00/.test($('mapaAtrasadosTxt').textContent),
+     $('mapaAtrasadosTxt').textContent.slice(-120));
+  ok('15b. y dónde se cambian', /Clientes/.test($('mapaAtrasadosTxt').textContent));
+
+  eval('pedidos = window.__P; misPlanes = window.__PL; clientes = [{id:1,nombre:"DISTRIBUIDORA PEPITO",lat:-33.45,lng:-70.66}];');
+
+  // ---------- 16. sin la red instalada, todo como antes ----------
   eval('HAY_POOL = false;');
   window.__poblar();
   const ops2 = [...$('rutaRep').options].map(o => o.textContent);
-  ok('12. sin la red, el mapa cuenta solo por repartidor_id',
+  ok('16. sin la red, el mapa cuenta solo por repartidor_id',
      /Hans Stuardo — 0 activos/.test(ops2.join(' | ')) &&
      /Martin Lagos — 2 activos/.test(ops2.join(' | ')), ops2.join(' | '));
   eval('HAY_POOL = true;');

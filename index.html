@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ZAS Reparto — Panel de Control</title>
-<!-- panel v1.48 -->
+<!-- panel v1.49 -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -4075,20 +4075,34 @@ const ordenEfectivo = p => {
 
    Los atrasados no se esconden: se cuentan y se avisan arriba del mapa.
    ============================================================ */
-function desdeCuandoCuenta(){
+/* v1.49 — la hora de corte es LA DE CADA CLIENTE.
+   Si Pepito corta a las 12:00 y otro cliente corta a las 11:00, lo que le
+   entre a ese después de las 11 ya es del día siguiente. Sin hora de corte
+   cargada se asume el mediodía. Se guarda en Clientes → Editar. */
+function horaCorteDe(clienteId){
+  const c = clientes.find(x => x.id === clienteId);
+  // ⚠️ ojo con el vacío: ''.split(':') da [''] y Number('') es 0, o sea
+  // medianoche. Sin hora cargada el corte tiene que ser el mediodía.
+  const m = /^(\d{1,2}):(\d{2})/.exec(String(c?.hora_corte || '').trim());
+  if(!m) return { h: 12, m: 0 };
+  const h = Number(m[1]), min = Number(m[2]);
+  return (h >= 0 && h <= 23 && min >= 0 && min <= 59) ? { h, m: min } : { h: 12, m: 0 };
+}
+/* Ayer, a la hora de corte de ese cliente. */
+function corteDeAyer(clienteId){
+  const { h, m } = horaCorteDe(clienteId);
   const d = new Date();
   d.setDate(d.getDate() - 1);
-  d.setHours(12, 0, 0, 0);
+  d.setHours(h, m, 0, 0);
   return d;
 }
-/* Un pedido «de hoy» para el mapa. Se mira la fecha de despacho, y si el
-   pedido es de ayer se exige además que haya entrado después del mediodía. */
+/* Un pedido «del día» para el mapa: los de hoy, y los de ayer que hayan
+   entrado después de la hora de corte de SU cliente. */
 function entraAlMapa(p){
   const hoy = hoyDia();
   if(!p.fecha_pedido) return false;
-  if(p.fecha_pedido > hoy) return true;         // programado para más adelante
-  if(p.fecha_pedido === hoy) return true;
-  const corte = desdeCuandoCuenta();
+  if(p.fecha_pedido >= hoy) return true;        // hoy o programado más adelante
+  const corte = corteDeAyer(p.cliente_id);
   const ayer = new Date(corte); ayer.setHours(0,0,0,0);
   if(p.fecha_pedido !== ayer.toLocaleDateString('en-CA')) return false;
   return p.creado_en ? new Date(p.creado_en) >= corte : false;
@@ -4118,9 +4132,16 @@ function poblarSelectorRuta(){
     if(atrasados.length){
       const viejo = atrasados.reduce((m,p)=> (p.fecha_pedido < m ? p.fecha_pedido : m),
                                      atrasados[0].fecha_pedido);
+      // qué horas de corte están en juego, para que se entienda el criterio
+      const cortes = [...new Set(atrasados.map(p=>{
+        const {h,m} = horaCorteDe(p.cliente_id);
+        return String(h).padStart(2,'0')+':'+String(m).padStart(2,'0');
+      }))].sort();
       $('mapaAtrasadosTxt').innerHTML =
         `⚠️ <b>${atrasados.length} pedidos sin asignar quedaron atrasados</b> ` +
-        `(el más viejo es del ${esc(viejo)}). No entran al mapa para no estirar las rutas de hoy.`;
+        `(el más viejo es del ${esc(viejo)}). No entran al mapa para no estirar las rutas de hoy. ` +
+        `<span class="cod">Entra lo de hoy y lo de ayer posterior a la hora de corte del cliente ` +
+        `(${cortes.join(', ')}), que se cambia en Clientes → Editar.</span>`;
     }
   }
 }

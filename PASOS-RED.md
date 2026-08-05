@@ -1,6 +1,6 @@
 # TODO LO QUE HAY QUE HACER — en orden
 
-Panel v1.48 · Maestro v1.2 · APK v2.9.0
+Panel v1.49 · Maestro v1.2 · APK v2.9.0
 Hacelo de arriba abajo, sin saltear. Toma unos 20 minutos.
 
 ---
@@ -40,14 +40,14 @@ la raíz de `zas-reparto\` (pisando lo que haya):
 
 | Archivo que te mandé | Dónde va |
 |---|---|
-| `index.html` | raíz — **es el panel v1.48 ya renombrado** |
+| `index.html` | raíz — **es el panel v1.49 ya renombrado** |
 | `panel-maestro.html` | raíz |
 | `seguimiento.html` | raíz |
 
 ```
 git add index.html panel-maestro.html seguimiento.html panel/ supabase/ test-*.mjs PASOS-RED.md
 git add ZAS-Reparto-v2.9.0-moderno.apk ZAS-Reparto-v2.9.0-antiguo.apk
-git commit -m "v1.48 el mapa solo con los pedidos del día"
+git commit -m "v1.49 el mapa respeta la hora de corte de cada cliente"
 git push
 ```
 
@@ -264,16 +264,22 @@ los del día. Dos filtros distintos para la misma cosa. Ahora usan exactamente e
 mismo, y ese filtro es una ventana clara:
 
 > **Entran al mapa los pedidos de hoy, y los de ayer que hayan entrado después
-> de las 12:00.** Lo de antes ya está atrasado.
+> de la hora de corte DE SU CLIENTE.** Lo de antes ya está atrasado.
 
-Es el ritmo cuando el corte es al mediodía: lo que llega ayer por la tarde sale
-hoy. Un pedido sin asignar de la semana pasada no es una parada de la ruta de
-hoy — metido en el mapa solo ensucia la vista y estira los sectores.
+La hora de corte es la que cada cliente tiene cargada en **Clientes → Editar →
+Hora de corte**, la misma que ya usás para programar los despachos. Si Pepito
+corta a las 12:00 y otro cliente corta a las 11:00, un pedido de ayer a las 11:30
+**entra** para el segundo y **no** para el primero. Un cliente sin hora cargada
+se trata como mediodía.
+
+Un pedido sin asignar de la semana pasada no es una parada de la ruta de hoy —
+metido en el mapa solo ensucia la vista y estira los sectores.
 
 Lo atrasado **no se esconde**: arriba del mapa aparece una franja
 «⚠️ N pedidos sin asignar quedaron atrasados (el más viejo es del …)» con un
 botón **Ver cuáles son** que te lleva a Pedidos ya filtrado por «Anteriores» y
-«Sin repartidor».
+«Sin repartidor». El cartel también dice qué horas de corte se aplicaron, así se
+entiende el criterio de un vistazo.
 
 ---
 
