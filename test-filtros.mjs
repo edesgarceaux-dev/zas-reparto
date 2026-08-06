@@ -110,26 +110,30 @@ const r = await page.evaluate(async () => {
   ok('3c. y por dirección', filas().length === 1, String(filas().length));
   window.__setBusq(''); window.__pintar();
 
-  // ---------- 4. la lista de estados ----------
-  const ops = [...$('fEstado').options].map(o => o.value);
-  ok('4. hay una lista desplegable de estados', ops.length > 1, ops.join(','));
-  ok('4b. solo ofrece los estados que hay hoy',
-     ops.includes('pendiente') && ops.includes('en_camino') && !ops.includes('cancelado'),
-     ops.join(','));
-  ok('4c. y ofrece los compartidos aparte', ops.includes('compartido'), ops.join(','));
+  // ---------- 4. el estado vive en los chips (v1.53) ----------
+  eval('filtro="todos";'); window.__pintar();
+  const chipsTxt = $('chipsFiltros').textContent;
+  ok('4. los chips ofrecen los 4 estados del procedimiento',
+     /Sin asignar/.test(chipsTxt) && /Asignados/.test(chipsTxt)
+       && /En camino/.test(chipsTxt) && /Entregados/.test(chipsTxt), chipsTxt);
+  ok('4b. y ya no hay desplegable de estado aparte', !$('fEstado'));
 
-  eval('fEstado = "en_camino";'); window.__pintar();
-  ok('5. filtrar por "en camino" deja un solo pedido', filas().length === 1,
+  eval('filtro="en_camino";'); window.__pintar();
+  ok('5. filtrar por "En camino" deja un solo pedido', filas().length === 1,
      String(filas().length));
   ok('5b. y es el correcto', /Luis Soto/.test(tabla()));
 
-  eval('fEstado = "compartido";'); window.__pintar();
-  ok('5c. filtrar por compartidos deja el que no es de nadie',
-     filas().length === 1 && /Mario Pino/.test(tabla()), String(filas().length));
-  eval('fEstado = "pendiente";'); window.__pintar();
-  ok('5d. "pendiente" NO se lleva a los compartidos por delante',
+  eval('filtro="sin_asignar";'); window.__pintar();
+  ok('5c. "Sin asignar" = sin repartidor y sin previsto (Patricia)',
      filas().length === 1 && /Patricia Morales/.test(tabla()), String(filas().length));
-  eval('fEstado = "";');
+  eval('filtro="asignados";'); window.__pintar();
+  ok('5d. "Asignados" incluye lo firme y lo previsto (Rosa + Mario)',
+     filas().length === 2 && /Rosa Díaz/.test(tabla()) && /Mario Pino/.test(tabla()),
+     String(filas().length));
+  eval('filtro="entregados";'); window.__pintar();
+  ok('5e. "Entregados" deja el terminado (Ana)',
+     filas().length === 1 && /Ana Rojas/.test(tabla()), String(filas().length));
+  eval('filtro="todos";');
 
   // ---------- 6. la lista de repartidores ----------
   const opsR = [...$('fRep').options].map(o => o.value);
@@ -151,32 +155,24 @@ const r = await page.evaluate(async () => {
   ok('7d. "sin repartidor" deja solo el que no tiene a nadie',
      filas().length === 1 && /Patricia Morales/.test(tabla()), String(filas().length));
 
-  // ---------- 8. los filtros se combinan ----------
-  eval('fRep = "r1"; fEstado = "entregado";'); window.__pintar();
+  // ---------- 8. el estado (chip) y el repartidor se combinan ----------
+  eval('fRep = "r1"; filtro = "entregados";'); window.__pintar();
   ok('8. estado y repartidor se combinan',
      filas().length === 1 && /Ana Rojas/.test(tabla()), String(filas().length));
   window.__setBusq('nadie asi'); window.__pintar();
   ok('8b. y el buscador se suma a los dos', filas().length === 0, String(filas().length));
-  window.__setBusq('');
+  window.__setBusq(''); eval('filtro="todos";');
 
   // ---------- 9. limpiar ----------
-  window.__pintar();
-  ok('9. con filtros puestos aparece el botón de limpiar',
+  eval('fRep = "r1";'); window.__pintar();
+  ok('9. con el filtro de repartidor puesto aparece el botón de limpiar',
      $('fLimpiar').style.display !== 'none', $('fLimpiar').style.display);
-  ok('9b. y los desplegables se resaltan',
-     $('fRep').style.fontWeight === '700' && $('fEstado').style.fontWeight === '700');
+  ok('9b. y el desplegable se resalta', $('fRep').style.fontWeight === '700');
   window.limpiarFiltros();
   ok('9c. limpiar devuelve los 5 pedidos', filas().length === 5, String(filas().length));
   ok('9d. y esconde el botón', $('fLimpiar').style.display === 'none');
   ok('9e. y apaga el resaltado', $('fRep').style.fontWeight === '');
-
-  // ---------- 10. sin la red de empresas instalada ----------
-  eval('HAY_POOL = false;'); window.__pintar();
-  ok('10. sin la migración de la red, nada figura como compartido',
-     !/compartido/.test(tabla()));
-  ok('10b. y el filtro de estados no ofrece "compartido"',
-     ![...$('fEstado').options].map(o => o.value).includes('compartido'));
-  eval('HAY_POOL = true;');
+  eval('filtro="todos";'); window.__pintar();
 
   // ============================================================
   // 11. LIBERAR (v1.53) — reemplaza "quitar asignación"/"soltar".

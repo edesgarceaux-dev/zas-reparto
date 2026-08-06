@@ -192,7 +192,6 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         <div id="chipsFiltros" style="display:flex;gap:8px;flex-wrap:wrap"></div>
         <span class="sp"></span>
         <input type="search" id="buscar" placeholder="Buscar cliente, dirección, n° de envío…">
-        <select id="fEstado" style="width:auto;padding:7px 10px;font-size:13px" title="Filtrar por estado"></select>
         <select id="fRep" style="width:auto;padding:7px 10px;font-size:13px" title="Filtrar por repartidor"></select>
         <button class="btn btn-ghost" id="fLimpiar" onclick="limpiarFiltros()" style="display:none" title="Sacar los filtros">✕</button>
         <button class="btn btn-ghost" id="btnAuto" onclick="abrirAutoRepartir()">🤖 Repartir auto</button>
@@ -2592,9 +2591,15 @@ function pintarChips(){
   // este es el montón que antes quedaba escondido en «Mi carga»
   const sueltos = listaDeTrabajo().filter(p =>
     p.cargado_en && !FIN.includes(p.estado) && !repartidorEfectivo(p)).length;
+  /* v1.53 — el estado vive en UN solo lugar: estos chips, con los 4 buckets
+     del procedimiento (Sin asignar · Asignados · En camino · Entregados).
+     Se quitó el desplegable "Estado" que hacía lo mismo por otro lado. */
   const chips = [
     {k:'activos', t:'Activos'},
     {k:'sin_asignar', t:'Sin asignar'},
+    {k:'asignados', t:'Asignados'},
+    {k:'en_camino', t:'En camino'},
+    {k:'entregados', t:'Entregados'},
     ...(sueltos ? [{k:'cargados_sueltos', t:`📦 Cargados sin repartidor (${sueltos})`}] : []),
     ...(atrasados ? [{k:'anteriores', t:`⚠️ Atrasados (${atrasados})`}] : []),
     ...fechas.map(f=>({k:'dia:'+f, t:`${etiqueta(f)} (${conteoDia[f]})`})),
@@ -2656,21 +2661,13 @@ function cumpleRepartidor(p){
   if(fRep === 'sin') return !repartidorEfectivo(p);
   return repartidorEfectivo(p) === fRep;
 }
-window.limpiarFiltros = ()=>{ fEstado=''; fRep=''; pintarPedidos(); };
+window.limpiarFiltros = ()=>{ fRep=''; pintarPedidos(); };
 
 function pintarFiltros(){
-  const selE = $('fEstado'), selR = $('fRep');
-  if(!selE || !selR) return;
-  // solo los estados que de verdad hay hoy en pantalla: menos ruido
+  const selR = $('fRep');
+  if(!selR) return;
+  // el estado ya vive en los chips; acá queda solo el filtro por repartidor
   const base = listaDeTrabajo();
-  const hayEstados = new Set(base.filter(p=>!esCompartido(p)).map(p=>p.estado));
-  const hayCompartidos = base.some(esCompartido);
-  selE.innerHTML = '<option value="">Estado: todos</option>'
-    + (hayCompartidos ? '<option value="compartido">🤝 Compartidos</option>' : '')
-    + Object.entries(EST).filter(([k])=>hayEstados.has(k))
-        .map(([k,v])=>`<option value="${k}">${v[1]} ${esc(v[0])}</option>`).join('');
-  selE.value = fEstado;
-
   const reps = perfiles.filter(p=>p.activo && p.rol!=='empresa')
     .sort((a,b)=>(a.nombre||'').localeCompare(b.nombre||''));
   const cuenta = id => base.filter(p=>repartidorEfectivo(p)===id).length;
@@ -2680,12 +2677,9 @@ function pintarFiltros(){
     + reps.map(r=>`<option value="${r.id}">${esc(r.nombre)} (${cuenta(r.id)})</option>`).join('');
   selR.value = fRep;
 
-  $('fLimpiar').style.display = (fEstado || fRep) ? '' : 'none';
-  // se resalta lo que está filtrando, para que no quede un filtro puesto sin querer
-  for(const s of [selE, selR]){
-    s.style.borderColor = s.value ? 'var(--brand)' : '';
-    s.style.fontWeight  = s.value ? '700' : '';
-  }
+  if($('fLimpiar')) $('fLimpiar').style.display = fRep ? '' : 'none';
+  selR.style.borderColor = selR.value ? 'var(--brand)' : '';
+  selR.style.fontWeight  = selR.value ? '700' : '';
 }
 
 function pintarPedidos(){
@@ -2694,7 +2688,10 @@ function pintarPedidos(){
   const hoy = hoyStr(); const q = busq.toLowerCase();
   const lista = listaDeTrabajo().filter(p=>{
     const f = filtro==='activos' ? !FIN.includes(p.estado)
-      : filtro==='sin_asignar' ? (p.estado==='pendiente' && p.fecha_pedido >= hoy)
+      : filtro==='sin_asignar' ? (!FIN.includes(p.estado) && !repartidorEfectivo(p))
+      : filtro==='asignados' ? (!!repartidorEfectivo(p) && !FIN.includes(p.estado) && p.estado!=='en_camino')
+      : filtro==='en_camino' ? (p.estado==='en_camino')
+      : filtro==='entregados' ? FIN.includes(p.estado)
       : filtro==='cargados_sueltos' ? (p.cargado_en && !FIN.includes(p.estado) && !repartidorEfectivo(p))
       : filtro==='anteriores' ? (p.fecha_pedido < hoy && !FIN.includes(p.estado) && p.repartidor_id)
       : filtro.startsWith('dia:') ? p.fecha_pedido===filtro.slice(4)
@@ -3495,7 +3492,6 @@ $('eGuardar').onclick = async ()=>{
 
 /* búsqueda (los chips de filtro se generan dinámicamente en pintarChips) */
 $('buscar').oninput = e=>{ busq = e.target.value; pintarPedidos(); };
-$('fEstado').onchange = e=>{ fEstado = e.target.value; pintarPedidos(); };
 $('fRep').onchange    = e=>{ fRep    = e.target.value; pintarPedidos(); };
 $('poolBuscar').oninput = e=>{ poolBusq = e.target.value; pintarPool(); };
 
