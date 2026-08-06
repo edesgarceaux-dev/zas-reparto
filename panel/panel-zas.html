@@ -2760,10 +2760,14 @@ function pintarPedidos(){
   const hoy = hoyStr(); const q = busq.toLowerCase();
   const lista = listaDeTrabajo().filter(p=>{
     const f = filtro==='activos' ? !FIN.includes(p.estado)
-      : filtro==='sin_asignar' ? (!FIN.includes(p.estado) && !repartidorEfectivo(p))
+      // "Sin asignar" = lo que hay que asignar de hoy en adelante (sin repartidor,
+      // no terminado). Los viejos sin asignar quedan fuera: se ven en Atrasados/Todos.
+      : filtro==='sin_asignar' ? (!FIN.includes(p.estado) && !repartidorEfectivo(p) && (!p.fecha_pedido || p.fecha_pedido >= hoy))
       : filtro==='asignados' ? (!!repartidorEfectivo(p) && !FIN.includes(p.estado) && p.estado!=='en_camino')
       : filtro==='en_camino' ? (p.estado==='en_camino')
-      : filtro==='entregados' ? FIN.includes(p.estado)
+      // "Entregados" = SOLO entregados de verdad. Los cancelados y no entregados
+      // no son entregas: se ven en Todos (y los no entregados, en Atrasados).
+      : filtro==='entregados' ? (p.estado==='entregado')
       : filtro==='cargados_sueltos' ? (p.cargado_en && !FIN.includes(p.estado) && !repartidorEfectivo(p))
       : filtro==='anteriores' ? (p.fecha_pedido < hoy && !FIN.includes(p.estado) && p.repartidor_id)
       : filtro.startsWith('dia:') ? p.fecha_pedido===filtro.slice(4)

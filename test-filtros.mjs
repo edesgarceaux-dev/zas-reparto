@@ -133,7 +133,24 @@ const r = await page.evaluate(async () => {
   eval('filtro="entregados";'); window.__pintar();
   ok('5e. "Entregados" deja el terminado (Ana)',
      filas().length === 1 && /Ana Rojas/.test(tabla()), String(filas().length));
-  eval('filtro="todos";');
+
+  // 5f/5g — los dos casos que reportó Etienne: viejo sin asignar y terminales
+  window.__ped.push(
+    {id:6,codigo:'ZAS-VIEJO',cliente_nombre:'Viejo SinAsignar',direccion:'x',comuna:'x',
+     estado:'pendiente',fecha_pedido:'2000-01-01',cliente_id:1,repartidor_id:null,empresa_reparto_id:1},
+    {id:7,codigo:'ZAS-CANC',cliente_nombre:'Cancelado Uno',direccion:'x',comuna:'x',
+     estado:'cancelado',fecha_pedido:HOY,cliente_id:1,repartidor_id:'r1',empresa_reparto_id:1},
+    {id:8,codigo:'ZAS-NOENT',cliente_nombre:'NoEntregado Uno',direccion:'x',comuna:'x',
+     estado:'no_entregado',fecha_pedido:HOY,cliente_id:1,repartidor_id:'r1',empresa_reparto_id:1});
+  eval('filtro="sin_asignar";'); window.__pintar();
+  ok('5f. "Sin asignar" NO arrastra los viejos sin asignar (sigue solo Patricia)',
+     filas().length === 1 && !/Viejo SinAsignar/.test(tabla()), String(filas().length));
+  eval('filtro="entregados";'); window.__pintar();
+  ok('5g. "Entregados" NO muestra cancelados ni no entregados (solo Ana)',
+     filas().length === 1 && /Ana Rojas/.test(tabla())
+       && !/Cancelado Uno/.test(tabla()) && !/NoEntregado Uno/.test(tabla()), String(filas().length));
+  window.__ped.length = 5;   // restaurar para los tests que siguen
+  eval('filtro="todos";'); window.__pintar();
 
   // ---------- 6. la lista de repartidores ----------
   const opsR = [...$('fRep').options].map(o => o.value);
