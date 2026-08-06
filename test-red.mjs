@@ -54,7 +54,7 @@ const r = await page.evaluate(async () => {
   await window.cargarTodo();
   ok('0. empresa nueva sin pedidos: igual reconoce que la migración está corrida',
       eval("HAY_POOL") === true, 'HAY_POOL=' + eval("HAY_POOL"));
-  ok('0b. le muestra la pestaña Mi carga', $('navPool').style.display !== 'none');
+  ok('0b. la pestaña "Mi carga" queda oculta: su contenido va dentro de Pedidos (v1.53)', $('navPool').style.display === 'none');
   ok('0c. le muestra el botón de sumar clientes de la red', $('btnSumarRed').style.display !== 'none');
   ok('0d. y ve la invitación que le mandaron', /Te invitaron a repartir/.test($('avisoVinculos').textContent),
       $('avisoVinculos').textContent.slice(0,80));

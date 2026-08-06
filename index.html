@@ -205,8 +205,7 @@ Resources:`;for(let t of c){if(!t||typeof t!=`string`)throw Error(`@supabase/aut
         <b id="masivaN"></b>
         <select id="masivaRep" style="width:auto;padding:6px 8px"></select>
         <button class="btn" id="masivaAsignar">Asignar</button>
-        <button class="btn btn-ghost" style="color:#fff;border-color:#666" id="masivaDesasignar">Quitar asignación</button>
-        <button class="btn btn-ghost" style="color:#9dd0ff;border-color:#456" id="masivaDevolver" title="Dejan de ser tuyos: vuelven a quedar a la vista de las otras empresas del cliente">🤝 Soltar</button>
+        <button class="btn btn-ghost" style="color:#ffe08a;border-color:#8a6100" id="masivaLiberar" title="Les quita el repartidor y los deja Sin asignar (si es de un cliente abierto, vuelven a estar disponibles para las otras empresas)">🔓 Liberar</button>
         <button class="btn btn-ghost" style="color:#ff9d9d;border-color:#844" id="masivaCancelar">🚫 Cancelar</button>
         <span class="sp" style="flex:1"></span>
         <button class="btn btn-ghost" style="color:#fff;border-color:#666" onclick="limpiarSeleccion()">✕ Limpiar</button>
@@ -2462,7 +2461,10 @@ async function cargarTodo(){
     if(mia) aviso.innerHTML = '👀 Estás viendo el panel de <b>'+esc(mia)+'</b>: solo su gente, sus clientes y sus pedidos. '
       + 'Para ver toda la red entrá al <a href="panel-maestro.html" style="color:inherit"><b>🛰️ panel maestro</b></a>.';
   }
-  $('navPool').style.display     = HAY_POOL ? '' : 'none';
+  // v1.53 — "Mi carga" ya no es una pestaña aparte: su contenido (bultos
+  // cargados sin repartidor) vive dentro de Pedidos, en el chip "📦 Cargados
+  // sin repartidor". Se deja oculta para no duplicar.
+  $('navPool').style.display     = 'none';
   $('navEmpresas').style.display = (HAY_POOL && soySuper) ? '' : 'none';
   if($('navMaestro')) $('navMaestro').style.display = soySuper ? '' : 'none';
   if($('btnSumarRed')) $('btnSumarRed').style.display = HAY_POOL ? '' : 'none';
@@ -3182,36 +3184,35 @@ async function quitarAsignacionA(ids){
   return { n, previstos, errores };
 }
 
-$('masivaDesasignar').onclick = async ()=>{
-  const ids = [...seleccion];
-  if(!ids.length) return;
-  const r = await quitarAsignacionA(ids);
-  if(r.errores.length){ toast('Error: '+r.errores[0]); return; }
-  toast(`Asignación quitada a ${r.n} pedido(s)` +
-        (r.previstos ? ` · ${r.previstos} dejaron de estar previstos` : '') +
-        ' — quedaron pendientes');
-  limpiarSeleccion(); cargarTodo();
+/* v1.53 — LIBERAR: una sola acción que reemplaza "Quitar asignación" y
+   "Soltar el pedido". Deja el pedido en Sin asignar (le quita repartidor y
+   orden de ruta); si el cliente reparte abierto con 2+ empresas, además lo
+   suelta de la empresa para que otra lo pueda tomar. Si la base todavía no
+   tiene la función nueva, cae en el camino viejo (solo quita el repartidor). */
+window.liberarPedido = async (ids)=>{
+  const arr = Array.isArray(ids) ? ids : [ids];
+  if(!arr.length) return false;
+  const { data, error } = await sb.rpc('liberar_pedido', { p_ids: arr });
+  if(error){
+    if(/liberar_pedido|does not exist|schema cache/i.test(error.message)){
+      const r = await quitarAsignacionA(arr);   // base sin migrar: quita el repartidor
+      if(r.errores.length){ toast('Error: '+r.errores[0]); return false; }
+      cerrar('mDet'); if(typeof limpiarSeleccion==='function') limpiarSeleccion();
+      toast(`${r.n} pedido(s) liberado(s): quedaron Sin asignar`); cargarTodo(); return true;
+    }
+    toast('Error: '+error.message); return false;
+  }
+  const n = data?.liberados || 0;
+  const noPudo = data?.no_pudo || [];
+  cerrar('mDet'); if(typeof limpiarSeleccion==='function') limpiarSeleccion();
+  toast(n
+    ? `🔓 ${n} ${n===1?'pedido liberado':'pedidos liberados'}: ${n===1?'vuelve':'vuelven'} a Sin asignar` +
+      (noPudo.length ? ` · ${noPudo.length} no se pudo` : '')
+    : `No se pudo liberar: ${noPudo[0]?.motivo || 'revisá el estado'}`);
+  cargarTodo(); return n>0;
 };
 
-$('masivaDevolver').onclick = async ()=>{
-  const ids = [...seleccion];
-  if(!ids.length) return;
-  if(!confirm(`¿Soltar ${ids.length} pedido(s)?\n\nDejan de ser tuyos y vuelven a quedar COMPARTIDOS: cualquier empresa habilitada por ese cliente se los puede llevar cargándolos. Los que ya van en ruta no se pueden soltar.`)) return;
-  const { data, error } = await sb.rpc('devolver_pedidos', { p_ids: ids, p_nota: 'devueltos en lote desde el panel' });
-  if(error){
-    toast(/devolver_pedidos/.test(error.message)
-      ? 'Falta correr migracion-red-empresas.sql en Supabase.'
-      : 'Error: '+error.message);
-    return;
-  }
-  const n = data?.devueltos || 0;
-  const noPudo = data?.no_pudo || [];
-  toast(n
-    ? `🤝 ${n} ${n===1?'pedido soltado':'pedidos soltados'}: quedaron compartidos` +
-      (noPudo.length ? ` · ${noPudo.length} no se pudo` : '')
-    : `No se pudo devolver ninguno: ${noPudo[0]?.motivo || 'revisá el estado'}`);
-  limpiarSeleccion(); cargarTodo();
-};
+$('masivaLiberar').onclick = ()=> liberarPedido([...seleccion]);
 
 $('masivaCancelar').onclick = async ()=>{
   const ids = [...seleccion];
@@ -3319,18 +3320,15 @@ window.verDetalle = async (id)=>{
     </p>` : ''}
     <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
       ${!FIN.includes(p.estado)?`<button class="btn btn-ghost" onclick="cambiarEstado(${p.id},'cancelado')">🚫 Cancelar pedido</button>`:''}
-      ${p.repartidor_id && !FIN.includes(p.estado)?`<button class="btn btn-ghost" onclick="desasignar(${p.id})">↩️ Quitar asignación</button>`:''}
+      ${!FIN.includes(p.estado) && (p.repartidor_id || p.empresa_reparto_id)
+        ? `<button class="btn btn-ghost" style="color:#8a6100;border-color:#e0cf9a" title="Le quita el repartidor y lo deja Sin asignar. Si es de un cliente abierto, vuelve a estar disponible para las otras empresas." onclick="liberarPedido(${p.id})">🔓 Liberar</button>`:''}
       ${p.estado==='no_entregado'?`<button class="btn btn-ghost" onclick="reintentar(${p.id})">🔄 Reintentar</button>`:''}
       ${p.estado==='cancelado'?`<button class="btn btn-ghost" onclick="reintentar(${p.id})">♻️ Reactivar (pendiente)</button>`:''}
       ${p.estado==='entregado'?`
         <button class="btn btn-ghost" onclick="cambiarEstado(${p.id},'en_camino')">⏪ Volver a "En camino"</button>
         <button class="btn btn-ghost" onclick="reintentar(${p.id})">♻️ Volver a pendiente (sin repartidor)</button>`:''}
       ${p.estado==='no_entregado'?`<button class="btn btn-ghost" onclick="cambiarEstado(${p.id},'en_camino')">⏪ Volver a "En camino"</button>`:''}
-      ${HAY_POOL && p.empresa_reparto_id && (['pendiente','asignado'].includes(p.estado) || (soySuper && !FIN.includes(p.estado)))
-        ? `<button class="btn btn-ghost" style="color:#8a6100;border-color:#e0cf9a" title="Deja de ser tuyo y vuelve a quedar a la vista de las otras empresas del cliente" onclick="devolverAlPool(${p.id})">🤝 Soltar el pedido${soySuper && !['pendiente','asignado'].includes(p.estado)?' (forzar)':''}</button>`:''}
     </div>
-    ${HAY_POOL && p.empresa_reparto_id && !['pendiente','asignado'].includes(p.estado) && !FIN.includes(p.estado)
-      ? `<div class="cod" style="margin-top:6px">Ya va en ruta${soySuper?': solo tú puedes forzar que lo suelte.':': no se puede soltar.'}</div>` : ''}
     ${prueba ? `
     <div style="margin-top:14px;padding:14px;background:#f2faf2;border:1px solid #cde8cd;border-radius:12px">
       <b style="font-size:13px;color:#0a6b0a">✅ Prueba de entrega</b>

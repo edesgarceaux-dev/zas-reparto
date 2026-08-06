@@ -85,35 +85,29 @@ const r = await page.evaluate(async () => {
   await window.tomarDelPool([1]);
   ok('7. si falta el SQL, lo dice claro', av.innerHTML.includes('migracion-red-empresas.sql'), av.textContent);
 
-  // ---------- 8. devolver al pool ----------
+  // ---------- 8. LIBERAR (v1.53, reemplaza el "Soltar" del pool) ----------
   eval(`sb.from = (t) => ({ select: () => ({ eq: () => ({ order: () => Promise.resolve({data:[]}) }) }) })`);
   await window.verDetalle(99);
   const det = document.getElementById('mDetBody').innerHTML;
-  ok('8. el pedido propio ofrece soltarlo', det.includes('Soltar el pedido'));
+  ok('8. el pedido propio ofrece Liberar', det.includes('🔓 Liberar'));
   ok('8b. muestra de qué empresa es', det.includes('Envíos ZAS'), '');
 
   eval("pedidos[0].estado = 'en_camino'; soySuper = false;");
   await window.verDetalle(99);
   const det2 = document.getElementById('mDetBody').innerHTML;
-  ok('9. una empresa NO puede devolver algo que va en camino',
-      !det2.includes('Soltar el pedido') && det2.includes('no se puede soltar'));
+  ok('9. ahora también se puede Liberar algo que va en camino (la oficina lo recupera)',
+      det2.includes('🔓 Liberar'));
+  eval("pedidos[0].estado = 'pendiente'; soySuper = true;");
 
-  eval("soySuper = true");
-  await window.verDetalle(99);
-  const det3 = document.getElementById('mDetBody').innerHTML;
-  ok('9b. el super-admin sí puede forzarlo aunque vaya en camino',
-      det3.includes('Soltar el pedido (forzar)') && det3.includes('solo tú puedes forzar'));
-  eval("pedidos[0].estado = 'pendiente'");
-
-  eval("sb.rpc = async (n,a) => { window.__ult={n,a}; return { data:{devueltos:1, ids:a.p_ids, no_pudo:[]}, error:null }; }");
+  eval("sb.rpc = async (n,a) => { window.__ult={n,a}; return { data:{liberados:1, ids:a.p_ids, no_pudo:[]}, error:null }; }");
   window.confirm = () => true;
-  await window.devolverAlPool(99);
-  ok('10. devolver llama a devolver_pedidos', window.__ult.n==='devolver_pedidos' && window.__ult.a.p_ids[0]===99, JSON.stringify(window.__ult));
+  await window.liberarPedido(99);
+  ok('10. Liberar llama a liberar_pedido', window.__ult.n==='liberar_pedido' && window.__ult.a.p_ids[0]===99, JSON.stringify(window.__ult));
 
-  eval("sb.rpc = async () => ({ data:{devueltos:0, no_pudo:[{id:99, motivo:'ya va en ruta (en_camino), no se puede soltar'}]}, error:null })");
+  eval("sb.rpc = async () => ({ data:{liberados:0, no_pudo:[{id:99, motivo:'ya está entregado, no se puede liberar'}]}, error:null })");
   window.__toasts = []; window.toast = m => window.__toasts.push(m);
-  await window.devolverAlPool(99);
-  ok('11. si no se puede devolver, explica por qué', (window.__toasts.join(' ')).includes('ya va en ruta'), window.__toasts.join(' | '));
+  await window.liberarPedido(99);
+  ok('11. si no se puede liberar, explica por qué', (window.__toasts.join(' ')).includes('no se puede liberar'), window.__toasts.join(' | '));
 
   // ---------- 12. administración de empresas ----------
   pintarEmpresas();

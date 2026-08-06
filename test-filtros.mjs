@@ -179,24 +179,17 @@ const r = await page.evaluate(async () => {
   eval('HAY_POOL = true;');
 
   // ============================================================
-  // 11. QUITAR LA ASIGNACIÓN TAMBIÉN SACA EL «PREVISTO»
+  // 11. LIBERAR (v1.53) — reemplaza "quitar asignación"/"soltar".
+  //     La mecánica de previsto/empresa la resuelve liberar_pedido en el
+  //     servidor; el panel solo tiene que llamarla con los ids elegidos.
   // ============================================================
   window.__rpcs = []; window.__upd = [];
   eval(`
     misPlanes = [{pedido_id:5, repartidor_id:'r2'}];
-    sb.from = () => ({
-      update: (v) => { const o = {
-        in: (c,ids)=>{ o.__ids=ids; return o; }, eq:(c,id)=>{ o.__ids=[id]; return o; },
-        not: ()=>o, select: ()=>o,
-        then: (f)=>{ window.__upd.push({v, ids:o.__ids||[]});
-                     return Promise.resolve({data:(o.__ids||[]).map(id=>({id})), error:null}).then(f); } };
-        return o; },
-    });
     sb.rpc = async (n, a) => { window.__rpcs.push({n, a});
-                               return { data:{sacados:(a&&a.p_ids||[]).length}, error:null }; };
+      return { data:{liberados:(a&&a.p_ids||[]).length, ids:(a&&a.p_ids||[]), no_pudo:[]}, error:null }; };
     seleccion.clear(); seleccion.add(5);
-    window.__quitarMasivo = () => document.getElementById('masivaDesasignar').onclick();
-    window.__desasignar   = desasignar;
+    window.__liberarMasivo = () => document.getElementById('masivaLiberar').onclick();
     window.__planes = () => misPlanes.length;
   `);
   window.cargarTodo = async () => {};
@@ -207,37 +200,18 @@ const r = await page.evaluate(async () => {
   ok('11. antes de tocar nada, el compartido sale como previsto',
      /previsto/.test(tabla()));
 
-  await window.__quitarMasivo();
-  ok('11b. quitar la asignación a un compartido llama a desplanificar_pedidos',
-     window.__rpcs.some(x => x.n === 'desplanificar_pedidos' && x.a.p_ids[0] === 5),
+  await window.__liberarMasivo();
+  ok('11b. Liberar en lote llama a liberar_pedido con los seleccionados',
+     window.__rpcs.some(x => x.n === 'liberar_pedido' && (x.a.p_ids||[]).includes(5)),
      JSON.stringify(window.__rpcs));
-  ok('11c. y NO intenta escribir el repartidor en la tabla de pedidos',
-     !window.__upd.some(u => (u.ids||[]).includes(5)),
-     JSON.stringify(window.__upd));
-  ok('11d. el plan se borra al toque, sin esperar la recarga',
-     window.__planes() === 0, String(window.__planes()));
-  window.__pintar();
-  ok('11e. y el «previsto» desaparece de la tabla', !/previsto/.test(tabla()));
-  ok('11f. el aviso lo dice con todas las letras',
-     /previstos|previsto/.test(window.__ultimoToast || ''), window.__ultimoToast);
-
-  // un pedido normal, que sí vive en la tabla pedidos
-  window.__rpcs = []; window.__upd = [];
-  eval('seleccion.clear(); seleccion.add(2);');
-  await window.__quitarMasivo();
-  ok('12. en un pedido propio sí se limpia la tabla de pedidos',
-     window.__upd.some(u => (u.ids||[]).includes(2) && u.v.repartidor_id === null),
-     JSON.stringify(window.__upd));
-  ok('12b. y no se llama a desplanificar de gusto',
-     !window.__rpcs.some(x => x.n === 'desplanificar_pedidos'),
-     JSON.stringify(window.__rpcs));
+  ok('11c. el aviso dice que quedó liberado / sin asignar',
+     /liberad|sin asignar/i.test(window.__ultimoToast || ''), window.__ultimoToast);
 
   // desde la ficha del pedido, de a uno
-  eval('misPlanes = [{pedido_id:5, repartidor_id:"r2"}];');
   window.__rpcs = [];
-  await window.__desasignar(5);
-  ok('13. desde la ficha del pedido pasa lo mismo',
-     window.__rpcs.some(x => x.n === 'desplanificar_pedidos') && window.__planes() === 0,
+  await window.liberarPedido(2);
+  ok('12. desde la ficha también llama a liberar_pedido',
+     window.__rpcs.some(x => x.n === 'liberar_pedido' && (x.a.p_ids||[])[0] === 2),
      JSON.stringify(window.__rpcs));
 
   // ============================================================
