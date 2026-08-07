@@ -84,7 +84,8 @@ class _RepartidorHomeState extends State<RepartidorHome>
   ///     los traigo de plan_reparto.
   /// Los planificados se marcan con `_previsto` para pintarlos distinto.
   Future<void> _recargar() async {
-    final uid = supa.auth.currentUser!.id;
+    final uid = supa.auth.currentUser?.id;
+    if (uid == null) return; // sesión cerrada: no hay a quién cargarle
     try {
       final mios = await supa
           .from('pedidos')
@@ -126,11 +127,13 @@ class _RepartidorHomeState extends State<RepartidorHome>
 
   /// Avisos de pedidos que otra empresa cargó primero.
   Future<void> _revisarAvisos() async {
+    final uid = supa.auth.currentUser?.id;
+    if (uid == null) return; // sesión cerrada
     try {
       final rows = await supa
           .from('avisos_red')
           .select()
-          .eq('repartidor_id', supa.auth.currentUser!.id)
+          .eq('repartidor_id', uid)
           .eq('visto', false)
           .limit(20);
       final avisos = List<Map<String, dynamic>>.from(rows);
@@ -282,8 +285,14 @@ class _RepartidorHomeState extends State<RepartidorHome>
       locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.high, distanceFilter: 25),
     ).listen((pos) {
+      final uid = supa.auth.currentUser?.id;
+      if (uid == null) {           // sesión cerrada: cortar el GPS, no escribir
+        _gps?.cancel();
+        _gps = null;
+        return;
+      }
       supa.from('ubicaciones').upsert({
-        'repartidor_id': supa.auth.currentUser!.id,
+        'repartidor_id': uid,
         'lat': pos.latitude,
         'lng': pos.longitude,
         'actualizado_en': DateTime.now().toUtc().toIso8601String(),
@@ -604,7 +613,15 @@ class _RepartidorHomeState extends State<RepartidorHome>
             onSelected: (v) {
               if (v == 'asignar') _abrirAsignar();
               if (v == 'bio') _cambiarBio(!_bioActiva);
-              if (v == 'salir') supa.auth.signOut();
+              if (v == 'salir') {
+                // cortar GPS y timers ANTES de cerrar sesión: si no, el stream
+                // dispara un upsert con currentUser null y la app crashea.
+                _gps?.cancel();
+                _gps = null;
+                _sincronizador?.cancel();
+                _colaTimer?.cancel();
+                supa.auth.signOut();
+              }
             },
             itemBuilder: (_) => [
               if (_puedeAsignar)
@@ -825,7 +842,7 @@ class _RepartidorHomeState extends State<RepartidorHome>
                           fontSize: 30)),
                   const SizedBox(width: 12),
                   Expanded(
-                    child: Text(p['cliente_nombre'],
+                    child: Text((p['cliente_nombre'] ?? 'Sin nombre').toString(),
                         style: const TextStyle(
                             fontWeight: FontWeight.w800,
                             fontSize: 19,

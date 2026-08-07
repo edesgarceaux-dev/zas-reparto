@@ -2,7 +2,7 @@ import { chromium } from 'playwright';
 import path from 'path';
 
 const url = 'file://' + path.resolve('panel/panel-zas.html');
-const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
+const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {});
 const page = await browser.newPage();
 const errores = [];
 page.on('pageerror', e => errores.push('pageerror: ' + e.message));
@@ -142,6 +142,9 @@ const r = await page.evaluate(async () => {
      JSON.stringify(v));
 
   // ---------- 8. no te dejás afuera sin querer ----------
+  // (los tests de arriba dispararon signOut, que ahora resetea adminUid;
+  //  en la realidad estás logueado editando tu cuenta, así que lo fijamos)
+  eval("adminUid='u1'");
   window.__editarRep('u1');
   ok('8. edita tu propia cuenta y te avisa',
      $('ePermAviso').style.display === 'block' && /TU cuenta/.test($('ePermAviso').textContent),

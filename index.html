@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ZAS Reparto — Panel de Control</title>
+<!-- panel v1.54 — fotos privadas: se muestran/bajan con URL firmada temporal -->
 <!-- panel v1.53 -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -935,6 +936,30 @@ const clienteDe = id => (clientes.find(c=>c.id===id)
                       || clientesRed.find(c=>c.id===id) || {}).nombre;
 const $ = id => document.getElementById(id);
 const esc = s => (s??'').toString().replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+/* ---------- FOTOS PRIVADAS: URLs firmadas ----------
+   El bucket 'entregas' es privado. Lo guardado sigue siendo la URL vieja
+   (…/entregas/<ruta>); de ahí sacamos la ruta y pedimos una URL firmada
+   (temporal). Si firmar falla (ej. bucket todavía público en el traspaso),
+   caemos a la URL guardada, así el panel nunca queda sin fotos. */
+const rutaFoto = u => {
+  if(!u) return null;
+  const i = u.indexOf('/entregas/');
+  if(i < 0) return null;                       // no reconocible: no se firma
+  try { return decodeURIComponent(u.slice(i + 10)); } catch(_) { return u.slice(i + 10); }
+};
+async function firmarFotos(urls){
+  const m = new Map();
+  const pares = (urls||[]).filter(Boolean).map(u => [u, rutaFoto(u)]).filter(([,r]) => r);
+  if(!pares.length) return m;
+  try{
+    const { data, error } = await sb.storage.from('entregas')
+      .createSignedUrls(pares.map(([,r]) => r), 3600);   // 1 hora
+    if(error || !data) return m;
+    data.forEach((d,i) => { if(d && d.signedUrl && !d.error) m.set(pares[i][0], d.signedUrl); });
+  }catch(_){ /* sin red o bucket aún público: se usa el fallback */ }
+  return m;
+}
 const clp = n => n==null?'—':'$'+Number(n).toLocaleString('es-CL');
 const hora = ts => ts? new Date(ts).toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'}) : '';
 const fechaHora = ts => ts? new Date(ts).toLocaleString('es-CL',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
@@ -977,6 +1002,13 @@ $('saSalir').onclick = ()=>{
 async function manejarSesion(session){
   if(!session){
     sesionMontada = null;
+    /* v1.53 — al cerrar sesión hay que soltar lo que queda vivo, si no los
+       canales de tiempo real y el timer de empresa siguen consultando la base
+       para siempre (y si entra otra cuenta en la misma pestaña, se acumulan). */
+    try { sb.removeAllChannels(); } catch(_){}
+    if(empTimer){ clearInterval(empTimer); empTimer = null; }
+    yaSuscrito = false; repSuscrito = false; empSuscrito = false;
+    adminUid = null; repUid = null; empCliId = null;
     $('app').style.display='none'; $('repApp').style.display='none'; $('empApp').style.display='none';
     // si acabamos de rebotar a alguien que solo usa la app, el cierre de
     // sesión es parte del rebote: hay que dejarle el cartel en pantalla
@@ -1155,7 +1187,7 @@ window.repCambiar = (id, nuevo)=>{
 };
 
 /* ---------- PORTAL EMPRESA (rol de solo lectura) ---------- */
-let empCliId=null, empPedidos=[], empFiltro='activos', empBusq='', empSuscrito=false, empNombre='';
+let empCliId=null, empPedidos=[], empFiltro='activos', empBusq='', empSuscrito=false, empNombre='', empTimer=null;
 async function iniciarEmpresa(perfil){
   empCliId = perfil.cliente_id;
   if(!empCliId){
@@ -1172,7 +1204,7 @@ async function iniciarEmpresa(perfil){
     sb.channel('emp-pedidos').on('postgres_changes',
       {event:'*', schema:'public', table:'pedidos', filter:`cliente_id=eq.${empCliId}`},
       ()=> cargarEmpPedidos()).subscribe();
-    setInterval(cargarEmpPedidos, 30000);
+    empTimer = setInterval(cargarEmpPedidos, 30000);
     $('empBuscar').oninput = e=>{ empBusq = e.target.value.toLowerCase(); pintarEmp(); };
   }
 }
@@ -1464,6 +1496,8 @@ window.verDetalleEmp = async (id)=>{
   const { data:hist } = await sb.from('pedido_historial').select().eq('pedido_id',id).order('creado_en');
   const { data:pruebas } = await sb.from('entregas_prueba').select().eq('pedido_id',id).order('creado_en',{ascending:false});
   const prueba = pruebas?.[0];
+  const fFirmadas = prueba ? await firmarFotos([prueba.foto_domicilio, prueba.foto_pedido, prueba.foto_receptor, prueba.foto_url]) : new Map();
+  const fSrc = u => fFirmadas.get(u) || u;
   const filas = [
     ['Cliente',p.cliente_nombre],['Teléfono',p.cliente_telefono],
     ['Dirección',p.direccion],['Comuna',p.comuna],['Referencia',p.referencia],
@@ -1495,8 +1529,8 @@ window.verDetalleEmp = async (id)=>{
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         ${[['foto_domicilio','🏠 Domicilio'],['foto_pedido','📦 Pedido'],['foto_receptor','🤝 Receptor'],['foto_url','📷 Foto']]
           .filter(([k])=>prueba[k])
-          .map(([k,t])=>`<a href="${esc(prueba[k])}" target="_blank" style="text-decoration:none;text-align:center">
-            <img src="${esc(prueba[k])}" style="width:86px;height:86px;object-fit:cover;border-radius:10px;border:1px solid #cde8cd">
+          .map(([k,t])=>`<a href="${esc(fSrc(prueba[k]))}" target="_blank" style="text-decoration:none;text-align:center">
+            <img src="${esc(fSrc(prueba[k]))}" style="width:86px;height:86px;object-fit:cover;border-radius:10px;border:1px solid #cde8cd">
             <div style="font-size:10.5px;color:#0a6b0a;margin-top:2px">${t}</div>
           </a>`).join('')}
       </div>
@@ -3335,6 +3369,8 @@ window.verDetalle = async (id)=>{
   const { data:hist } = await sb.from('pedido_historial').select().eq('pedido_id',id).order('creado_en');
   const { data:pruebas } = await sb.from('entregas_prueba').select().eq('pedido_id',id).order('creado_en',{ascending:false});
   const prueba = pruebas?.[0];
+  const fFirmadas = prueba ? await firmarFotos([prueba.foto_domicilio, prueba.foto_pedido, prueba.foto_receptor, prueba.foto_url]) : new Map();
+  const fSrc = u => fFirmadas.get(u) || u;
   const reps = perfiles.filter(x=>x.activo && x.rol!=='empresa').map(x=>({...x, nombre: x.nombre + (x.rol==='admin'?' (admin)':'')}));
   const filas = [
     ['Empresa', p.cliente_id? (clienteDe(p.cliente_id)||'')+(p.origen==='jumpseller'?' (⚡ pedido automático Jumpseller'+(p.externo_id?' #'+p.externo_id:'')+')':'') : null],
@@ -3413,8 +3449,8 @@ window.verDetalle = async (id)=>{
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         ${[['foto_domicilio','🏠 Domicilio'],['foto_pedido','📦 Pedido'],['foto_receptor','🤝 Receptor'],['foto_url','📷 Foto']]
           .filter(([k])=>prueba[k])
-          .map(([k,t])=>`<a href="${esc(prueba[k])}" target="_blank" style="text-decoration:none;text-align:center">
-            <img src="${esc(prueba[k])}" style="width:86px;height:86px;object-fit:cover;border-radius:10px;border:1px solid #cde8cd">
+          .map(([k,t])=>`<a href="${esc(fSrc(prueba[k]))}" target="_blank" style="text-decoration:none;text-align:center">
+            <img src="${esc(fSrc(prueba[k]))}" style="width:86px;height:86px;object-fit:cover;border-radius:10px;border:1px solid #cde8cd">
             <div style="font-size:10.5px;color:#0a6b0a;margin-top:2px">${t}</div>
           </a>`).join('')}
       </div>
@@ -4988,13 +5024,21 @@ async function arBajarFotos(filas, zip){
       tareas.push({ f, slot, url });
     }
   }
+  // Bucket privado: hay que firmar cada URL antes de bajarla. Firmo de a 100
+  // (una sola llamada por lote) y guardo url_guardada -> url_firmada.
+  const firmadas = new Map();
+  for(let i=0; i<tareas.length; i += 100){
+    if(arCancelado) break;
+    const m = await firmarFotos(tareas.slice(i, i+100).map(t=>t.url));
+    m.forEach((v,k)=>firmadas.set(k,v));
+  }
   let hechos = 0, fallidas = 0;
   const CONCURRENTES = 6;
   for(let i=0; i<tareas.length; i += CONCURRENTES){
     if(arCancelado) break;
     await Promise.all(tareas.slice(i, i+CONCURRENTES).map(async t=>{
       try{
-        const resp = await fetch(t.url);
+        const resp = await fetch(firmadas.get(t.url) || t.url);
         if(!resp.ok) throw new Error('HTTP '+resp.status);
         const carpeta = `fotos/${t.f.n_envio || t.f.codigo || t.f.pedido_id}`;
         zip.file(`${carpeta}/${t.slot}.jpg`, await resp.blob());

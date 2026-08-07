@@ -2,7 +2,7 @@ import { chromium } from 'playwright';
 import path from 'path';
 
 const url = 'file://' + path.resolve('panel/panel-maestro.html');
-const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
+const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {});
 const page = await browser.newPage();
 const errors = [];
 page.on('pageerror', e => errors.push('pageerror: ' + e.message));
