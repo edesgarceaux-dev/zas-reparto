@@ -2,7 +2,7 @@ name: zas_reparto
 description: "App de reparto ZAS - gestion y asignacion de pedidos."
 publish_to: 'none'
 
-version: 2.9.1+19
+version: 2.9.2+20
 
 environment:
   sdk: ^3.8.1
